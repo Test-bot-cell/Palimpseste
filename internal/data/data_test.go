@@ -68,7 +68,12 @@ func TestValidateRejects(t *testing.T) {
 		name   string
 		mutate func(*Table)
 	}{
-		{"missing declared column", func(t *Table) { t.Header = t.Header[:4]; for i := range t.Rows { t.Rows[i] = t.Rows[i][:4] } }},
+		{"missing declared column", func(t *Table) {
+			t.Header = t.Header[:4]
+			for i := range t.Rows {
+				t.Rows[i] = t.Rows[i][:4]
+			}
+		}},
 		{"undeclared column", func(t *Table) {
 			t.Header = append(t.Header, "mdp")
 			for i := range t.Rows {

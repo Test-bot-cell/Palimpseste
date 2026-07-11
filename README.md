@@ -76,9 +76,12 @@ un commit `edit(page/slot)` signé de votre identité git (§13).
   persistance de `tokens.css` seul), slots `stack` + panneaux de config
   générés du catalogue, panneau SEO + lint à la demande, la preuve par deux
   (`drake` ↔ `atelier`).
-- ⏳ **M3 — Médias, données, distant.** Pipeline WebP/wazero + og-JPEG,
-  contrat SVG + logo inline + favicons, grille `data/` + rendu du bloc
-  `table`, auth et publication.
+- ✅ **M3 — Médias, données, distant.** Contrat `data/` (CSV validé au schéma)
+  + grille tableur + rendu du bloc `table` ; pipeline raster WebP/wazero
+  (variantes responsive + `srcset`, og-JPEG, file asynchrone) ; contrat SVG
+  (sanitiseur XML maison, logo inline `currentColor`, favicons dérivés) ;
+  minification HTML + attestation étendue (`data/` + encodeur WASM) ; auth
+  distante (argon2id, `edit --listen`) ; publication (`git-push`).
 - ⏳ **M4 — Finitions produit.** Assistant IA (édition seulement, §12),
   historique/revert dans l'UI, packaging reproductible, doc thèmes tiers.
 
@@ -101,22 +104,31 @@ internal/                     — couche 0 : primitive —
               (tout ce qui écrit du HTML passe par lui : jamais de regex, §7)
 
                               — couche 1 : les contrats (données pures) —
-  site        site.json : identité, routes, pages, méta SEO (§3.1) ; Save atomique
+  site        site.json : identité, routes, pages, méta SEO, publish (§3.1) ; Save atomique
   theme       theme.json complet §5.1 : slots typés, schémas data, tokens typés,
               templates ; lecture/écriture de tokens.css (§6)
   content     résolution slot → fragment sur disque, écriture atomique (§3.2)
+  data        contrat data/ (§3.3) : CSV validé au schéma du thème (le bluemonday
+              des données), écriture canonique atomique
   blocks      le catalogue §4.1 : blocs nommés, schémas de paramètres typés/bornés ;
               Schema() sérialisable pour les panneaux de config générés (§9)
   sanitize    LE gardien du contrat de contenu (§4) : whitelist bluemonday +
               normalisation de collage + validation structurelle (blocs, media/,
               alt, embed) ; FragmentForSlot applique le micro-contrat du slot
               (plain, stack, liste de blocs) ; toute écriture passe ici
+  svg         le contrat SVG (§10.2) : sanitiseur XML maison (profils img/inline),
+              logo inline currentColor, dérivation des favicons
   themecheck  la validation de compatibilité §5.3 : Check (rapport, jamais de
               mutation) et Apply (migrate renames + bascule site.json)
+  auth        auth mono-admin distante (§14) : argon2id, sessions, rate-limit
+  publish     l'acte de déploiement (§13) : git-push, credentials hors dépôt
 
                               — couche 2 : le moteur pur (§7) —
   materialize injection des fragments par data-slot + rendu des blocs computés
-              (toc ; table arrive avec data/ en M3) + résolution des URLs media
+              (toc, table depuis data/) + logo SVG inline + srcset + résolution
+              des URLs media
+  media       pipeline raster (§10.1) : WebP via libwebp-WASM/wazero, variantes
+              responsive, og-JPEG, file asynchrone — hors du chemin de sauvegarde
   css         passe esbuild in-process, bundle adressé par contenu
   seo         sitemap, canoniques, JSON-LD, OG — déterministes
   lint        le --check §11 : règles, zéro IA
@@ -129,9 +141,10 @@ internal/                     — couche 0 : primitive —
                               — couche 4 : le backend déplacé dans le temps —
   editserver  le mode edit : API §8 (CSRF + Origin + regex stricte §14),
               chaîne PUT = sanitisation → écriture → commit → build incrémental,
-              SSE typé (build/error/reload), overlay TypeScript transpilé
-              in-process (assets/app.ts, Shadow DOM intégral §9) ; endpoints M2 :
-              theme (get/tokens/check/apply/themes), pages/{}/meta, check
+              SSE typé (build/error/reload/media), overlay TypeScript transpilé
+              in-process (assets/app.ts, Shadow DOM intégral §9) ; API M2/M3 :
+              theme, pages/{}/meta, check, data/{table}, media, publish ; auth
+              distante en option (mode --listen)
   history     chaque sauvegarde = un commit go-git, auteur = utilisateur (§13) ;
               CommitPaths regroupe une migration (renames) en un commit dédié
 ```

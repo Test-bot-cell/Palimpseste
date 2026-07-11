@@ -37,6 +37,7 @@ import (
 	"palimpseste/internal/css"
 	"palimpseste/internal/history"
 	"palimpseste/internal/media"
+	"palimpseste/internal/publish"
 	"palimpseste/internal/sanitize"
 	"palimpseste/internal/site"
 	"palimpseste/internal/theme"
@@ -296,12 +297,13 @@ func (s *Server) handlePage(w http.ResponseWriter, r *http.Request) {
 		slots[name] = slotDecl{Type: string(sl.Type), Blocks: sl.Blocks}
 	}
 	cfg := overlayConfig{
-		Page:   p.ID,
-		CSRF:   s.csrf,
-		Pages:  snap.pages,
-		Slots:  slots,
-		Blocks: blocks.Schema(),
-		Meta:   pageMeta{Title: p.Title, Description: p.Description, OgImage: p.OgImage},
+		Page:    p.ID,
+		CSRF:    s.csrf,
+		Pages:   snap.pages,
+		Slots:   slots,
+		Blocks:  blocks.Schema(),
+		Meta:    pageMeta{Title: p.Title, Description: p.Description, OgImage: p.OgImage},
+		Publish: publish.Configured(snap.site.Publish),
 	}
 	out, err := renderEditPage(snap.theme, snap.ldr, snap.site, p, s.opts.SiteDir, !snap.css.Empty(), cfg)
 	if err != nil {

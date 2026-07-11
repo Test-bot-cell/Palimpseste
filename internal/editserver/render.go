@@ -36,12 +36,13 @@ const (
 // source of truth (§9), and the page's current meta for the SEO panel (§11).
 // The UI never offers what the server would refuse.
 type overlayConfig struct {
-	Page   string                        `json:"page"`
-	CSRF   string                        `json:"csrf"`
-	Pages  []pageEntry                   `json:"pages"`
-	Slots  map[string]slotDecl           `json:"slots"`
-	Blocks map[string]blocks.BlockSchema `json:"blocks"`
-	Meta   pageMeta                      `json:"meta"`
+	Page    string                        `json:"page"`
+	CSRF    string                        `json:"csrf"`
+	Pages   []pageEntry                   `json:"pages"`
+	Slots   map[string]slotDecl           `json:"slots"`
+	Blocks  map[string]blocks.BlockSchema `json:"blocks"`
+	Meta    pageMeta                      `json:"meta"`
+	Publish bool                          `json:"publish"` // site declares a publish method (§13)
 }
 
 // slotDecl is the slot subset the overlay needs.

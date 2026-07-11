@@ -38,6 +38,7 @@ type OverlayConfig = {
   slots: Record<string, SlotDecl>;
   blocks: Record<string, BlockSchema>;
   meta: PageMeta;
+  publish: boolean;
 };
 
 const cfgEl = document.getElementById("_pal-config");
@@ -150,6 +151,7 @@ shadow.innerHTML = `
     <button id="btn-theme" title="Thème et tokens">Thème</button>
     <button id="btn-seo" title="Référencement de la page">SEO</button>
     <button id="btn-check" title="Vérifier la qualité (§11)">Vérifier</button>
+    <button id="btn-publish" title="Publier vers le dépôt distant" hidden>Publier</button>
     <span class="status" id="status">prêt</span>
     <button id="save" disabled title="Enregistrer (Ctrl+S)">Enregistrer</button>
   </div>
@@ -238,6 +240,16 @@ for (const region of regions) {
   // blocs, §5.1) — pas de contenteditable de prose libre.
   if (type === "stack") {
     initStackRegion(region, slot);
+    continue;
+  }
+  // Un slot image ouvre le sélecteur média (§9) ; un slot data ouvre la grille
+  // type tableur — ni l'un ni l'autre n'est du contenteditable de prose.
+  if (type === "image") {
+    initImageRegion(region, slot);
+    continue;
+  }
+  if (type === "data") {
+    initDataRegion(region, slot);
     continue;
   }
 
@@ -360,6 +372,11 @@ function esc(s: string): string {
 byId("btn-theme").addEventListener("click", () => togglePanel("theme", renderThemePanel));
 byId("btn-seo").addEventListener("click", () => togglePanel("seo", renderSEOPanel));
 byId("btn-check").addEventListener("click", () => togglePanel("check", renderCheckPanel));
+const publishBtn = byId("btn-publish") as HTMLButtonElement;
+if (CFG.publish) {
+  publishBtn.hidden = false;
+  publishBtn.addEventListener("click", publish);
+}
 
 // ---- panneau Thème : tokens en direct (§6) + bascule de thème (§5.3) ------------
 
@@ -644,7 +661,162 @@ function stackFragment(region: HTMLElement): string {
   return clone.innerHTML;
 }
 
-// ---- flux d'évènements (SSE, §8 : builds, erreurs, reload) ----------------------
+// ---- sélecteur média : slots image (§9/§10) ------------------------------------
+
+// Un slot image édite une <figure><img>. Cliquer ouvre un choix : téléverser un
+// fichier (raster → variantes WebP+srcset, ou SVG → assaini) puis, une fois
+// prêt, pointer l'image dessus. Le fragment stocké reste media/<chemin> ; le
+// serveur canonicalise.
+function initImageRegion(region: HTMLElement, slot: string): void {
+  region.setAttribute("data-pal-image", "true");
+  paintRegion(region);
+  region.style.cursor = "pointer";
+  region.title = "Cliquer pour changer l'image";
+  region.addEventListener("click", (e) => {
+    e.preventDefault();
+    openMediaPicker((mediaPath) => {
+      region.innerHTML = `<figure><img src="${esc(mediaPath)}" alt=""></figure>`;
+      markDirty(slot);
+      paintRegion(region);
+    });
+  });
+}
+
+function openMediaPicker(onPick: (mediaPath: string) => void): void {
+  const input = document.createElement("input");
+  input.type = "file";
+  input.accept = "image/jpeg,image/png,image/webp,image/svg+xml";
+  input.addEventListener("change", async () => {
+    const file = input.files?.[0];
+    if (!file) return;
+    setStatus("téléversement…");
+    const body = new FormData();
+    body.append("file", file);
+    const res = await fetch(`${API}/media`, {
+      method: "POST",
+      headers: { "X-Pal-CSRF": CFG.csrf },
+      body,
+    });
+    if (!res.ok) {
+      setStatus("téléversement refusé : " + (await res.text()).slice(0, 120), "error");
+      return;
+    }
+    const data = await res.json();
+    if (data.original) {
+      // SVG : réponse synchrone, chemin immédiat.
+      onPick(data.original);
+      setStatus("image ajoutée", "saved");
+    } else if (data.id) {
+      // Raster : la file travaille en asynchrone ; on attend l'évènement media.
+      setStatus("encodage de l'image…");
+      pendingMedia.set(data.id, onPick);
+    }
+  });
+  input.click();
+}
+
+const pendingMedia = new Map<string, (path: string) => void>();
+
+// ---- grille tableur : slots data (§3.3/§9) -------------------------------------
+
+function initDataRegion(region: HTMLElement, slot: string): void {
+  region.setAttribute("data-pal-data", "true");
+  paintRegion(region);
+  region.style.cursor = "pointer";
+  region.title = "Cliquer pour éditer la table";
+  region.addEventListener("click", (e) => {
+    e.preventDefault();
+    const source = region.getAttribute("data-source") || slot;
+    openDataGrid(source);
+  });
+}
+
+async function openDataGrid(table: string): Promise<void> {
+  togglePanel("data:" + table, async () => {
+    panelEl.innerHTML = `<h2>Table « ${esc(table)} »</h2><p class="hint">Chargement…</p>`;
+    const data = await fetch(`${API}/data/${encodeURIComponent(table)}`).then((r) => r.json());
+    renderDataGrid(table, data);
+  });
+}
+
+function renderDataGrid(table: string, data: any): void {
+  const header: string[] = data.header?.length ? data.header : Object.keys(data.schema || {});
+  const rows: string[][] = data.rows || [];
+  const schema: Record<string, string> = data.schema || {};
+
+  const head = header.map((h) => `<th>${esc(h)} <span class="val">${esc(schema[h] || "")}</span></th>`).join("");
+  const body = rows
+    .map(
+      (row, i) =>
+        `<tr data-row="${i}">${header
+          .map((h, j) => `<td><input data-col="${j}" value="${esc(row[j] || "")}"></td>`)
+          .join("")}<td><button data-del-row="${i}" title="Supprimer la ligne">✕</button></td></tr>`,
+    )
+    .join("");
+
+  panelEl.innerHTML = `
+    <h2>Table « ${esc(table)} » <span class="val">${schema ? Object.keys(schema).length : 0} colonne(s)</span></h2>
+    <p class="hint">Validée à l'enregistrement contre le schéma du thème (§3.3). Cellule vide = donnée absente, autorisée.</p>
+    <div style="overflow:auto"><table style="border-collapse:collapse;width:100%">
+      <thead><tr>${head}<th></th></tr></thead><tbody id="grid-body">${body}</tbody>
+    </table></div>
+    <div style="margin-top:.6rem;display:flex;gap:.5rem">
+      <button id="grid-add">+ Ligne</button>
+      <button id="grid-save">Enregistrer la table</button>
+    </div>`;
+
+  byId("grid-add").addEventListener("click", () => {
+    const empty = header.map(() => "");
+    rows.push(empty);
+    renderDataGrid(table, { header, rows, schema });
+  });
+  for (const b of panelEl.querySelectorAll<HTMLButtonElement>("[data-del-row]")) {
+    b.addEventListener("click", () => {
+      rows.splice(Number(b.dataset.delRow), 1);
+      renderDataGrid(table, { header, rows, schema });
+    });
+  }
+  // Keep the in-memory rows synced with edits.
+  for (const inp of panelEl.querySelectorAll<HTMLInputElement>("[data-col]")) {
+    inp.addEventListener("input", () => {
+      const tr = inp.closest("tr")!;
+      const i = Number(tr.getAttribute("data-row"));
+      const j = Number(inp.dataset.col);
+      rows[i][j] = inp.value;
+    });
+  }
+  byId("grid-save").addEventListener("click", () => saveDataGrid(table, header, rows));
+}
+
+async function saveDataGrid(table: string, header: string[], rows: string[][]): Promise<void> {
+  setStatus("enregistrement de la table…");
+  const res = await fetch(`${API}/data/${encodeURIComponent(table)}`, {
+    method: "PUT",
+    headers: { "Content-Type": "application/json", "X-Pal-CSRF": CFG.csrf },
+    body: JSON.stringify({ header, rows }),
+  });
+  if (res.ok) {
+    setStatus("table enregistrée", "saved");
+  } else {
+    setStatus("table refusée : " + (await res.text()).slice(0, 140), "error");
+  }
+}
+
+// ---- publication (§13) : bouton, si le site la déclare --------------------------
+
+async function publish(): Promise<void> {
+  if (!confirm("Publier le site vers son dépôt distant ?")) return;
+  setStatus("publication…");
+  const res = await fetch(`${API}/publish`, { method: "POST", headers: { "X-Pal-CSRF": CFG.csrf } });
+  if (res.ok) {
+    const r = await res.json();
+    setStatus(`publié → ${r.remote}/${r.branch} (${r.detail})`, "saved");
+  } else {
+    setStatus("publication échouée : " + (await res.text()).slice(0, 140), "error");
+  }
+}
+
+// ---- flux d'évènements (SSE, §8 : builds, erreurs, reload, média) ---------------
 
 const events = new EventSource(API + "/events");
 events.addEventListener("reload", () => {
@@ -657,6 +829,25 @@ events.addEventListener("build", (e) => {
     setStatus(`enregistré — page régénérée en ${b.ms} ms`, "saved");
   } catch {
     /* un build illisible n'est pas une erreur d'édition */
+  }
+});
+events.addEventListener("media", (e) => {
+  try {
+    const ev = JSON.parse((e as MessageEvent).data);
+    if (ev.stage) {
+      setStatus("image : " + ev.stage);
+    } else if (ev.result) {
+      const cb = pendingMedia.get(ev.id);
+      if (cb) {
+        pendingMedia.delete(ev.id);
+        cb(ev.result.original);
+      }
+      setStatus("image ajoutée", "saved");
+    } else if (ev.error) {
+      setStatus("image refusée : " + ev.error, "error");
+    }
+  } catch {
+    /* évènement média illisible : ignoré */
   }
 });
 events.addEventListener("error", (e) => {

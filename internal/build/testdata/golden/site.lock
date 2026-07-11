@@ -7,5 +7,6 @@
   },
   "contentHash": "bbff29a05cce7a387189da9c370b6a9afe40fc5adebe5e3d03dbf7d86132141a",
   "dataHash": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+  "mediaEncoder": "github.com/gen2brain/webp v0.6.4 (libwebp WASM via wazero)",
   "pages": 2
 }

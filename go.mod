@@ -34,6 +34,8 @@ require (
 	github.com/skeema/knownhosts v1.3.1 // indirect
 	github.com/srwiley/oksvg v0.0.0-20221011165216-be6e8873101c // indirect
 	github.com/srwiley/rasterx v0.0.0-20220730225603-2ab79fcdd4ef // indirect
+	github.com/tdewolff/minify/v2 v2.24.13 // indirect
+	github.com/tdewolff/parse/v2 v2.8.12 // indirect
 	github.com/xanzy/ssh-agent v0.3.3 // indirect
 	golang.org/x/crypto v0.50.0 // indirect
 	golang.org/x/image v0.0.0-20211028202545-6944b10bf410 // indirect

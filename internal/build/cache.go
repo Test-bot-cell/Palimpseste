@@ -21,7 +21,7 @@ import (
 // binary identity recorded in site.lock (§7): either one changing invalidates
 // every entry. The byte-exact golden test builds with the cache off, so any such
 // output change surfaces there and is the cue to bump this constant.
-const cacheFormatVersion = "1"
+const cacheFormatVersion = "2"  // bumped: HTML minify pass (§7) changes page bytes
 
 // renderCache memoises fully rendered page bytes keyed by the content hash of a
 // page's input tuple (§7: "mémoïsation par content-addressing"). It is an

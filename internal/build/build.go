@@ -27,12 +27,15 @@ import (
 	"sync"
 	"time"
 
+	"github.com/tdewolff/minify/v2"
+	mhtml "github.com/tdewolff/minify/v2/html"
 	"golang.org/x/net/html"
 
 	"palimpseste/internal/content"
 	"palimpseste/internal/css"
 	"palimpseste/internal/lint"
 	"palimpseste/internal/materialize"
+	"palimpseste/internal/media"
 	"palimpseste/internal/render"
 	"palimpseste/internal/seo"
 	"palimpseste/internal/site"
@@ -74,11 +77,12 @@ type Result struct {
 
 // Lock is the site.lock attestation: enough to prove what produced this output.
 type Lock struct {
-	Palimpseste string    `json:"palimpseste"`
-	Theme       LockTheme `json:"theme"`
-	ContentHash string    `json:"contentHash"`
-	DataHash    string    `json:"dataHash"`
-	Pages       int       `json:"pages"`
+	Palimpseste  string    `json:"palimpseste"`
+	Theme        LockTheme `json:"theme"`
+	ContentHash  string    `json:"contentHash"`
+	DataHash     string    `json:"dataHash"`
+	MediaEncoder string    `json:"mediaEncoder"` // WASM encoder identity (§7, §10.1)
+	Pages        int       `json:"pages"`
 }
 
 // LockTheme identifies the theme by name, declared version and tree hash.
@@ -202,11 +206,12 @@ func Run(opts Options) (*Result, error) {
 		return nil, err
 	}
 	res.Lock = Lock{
-		Palimpseste: opts.Version,
-		Theme:       LockTheme{Name: t.Name, Version: t.Version, Hash: themeHash},
-		ContentHash: contentHash,
-		DataHash:    dataHash,
-		Pages:       res.Pages,
+		Palimpseste:  opts.Version,
+		Theme:        LockTheme{Name: t.Name, Version: t.Version, Hash: themeHash},
+		ContentHash:  contentHash,
+		DataHash:     dataHash,
+		MediaEncoder: media.EncoderIdentity,
+		Pages:        res.Pages,
 	}
 	lockJSON, err := marshalLock(res.Lock)
 	if err != nil {
@@ -505,7 +510,31 @@ func materializeRender(t *theme.Theme, ldr *content.Loader, s *site.Site, p site
 	if err != nil {
 		return nil, nil, rep, fmt.Errorf("render page %q: %w", p.ID, err)
 	}
-	return []byte(out), doc, rep, nil
+	min, err := minifyHTML([]byte(out))
+	if err != nil {
+		return nil, nil, rep, fmt.Errorf("minify page %q: %w", p.ID, err)
+	}
+	return min, doc, rep, nil
+}
+
+// htmlMinifier is built once; tdewolff minifiers are safe for concurrent use.
+// The settings are conservative — structure and semantics untouched, only
+// insignificant whitespace and comments removed — so the output stays valid
+// and the §11 lint (which reads the live document, not these bytes) is
+// unaffected. Deterministic: same input, same bytes (§7).
+var htmlMinifier = func() *minify.M {
+	m := minify.New()
+	m.Add("text/html", &mhtml.Minifier{
+		KeepDocumentTags: true,
+		KeepEndTags:      true,
+		KeepQuotes:       true,
+		KeepWhitespace:   false,
+	})
+	return m
+}()
+
+func minifyHTML(b []byte) ([]byte, error) {
+	return htmlMinifier.Bytes("text/html", b)
 }
 
 // workerCount bounds the materialization pool at one goroutine per CPU, never

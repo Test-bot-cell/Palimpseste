@@ -30,6 +30,7 @@ import (
 	"sync"
 	"time"
 
+	"palimpseste/internal/ai"
 	"palimpseste/internal/auth"
 	"palimpseste/internal/blocks"
 	"palimpseste/internal/build"
@@ -80,6 +81,7 @@ type Server struct {
 	hub      *hub
 	hist     *history.Recorder
 	mediaQ   *media.Queue
+	ai       *ai.Client
 	mux      *http.ServeMux
 	sessions *auth.Sessions
 	limiter  *auth.Limiter
@@ -135,6 +137,10 @@ func New(opts Options) (*Server, error) {
 	}
 	s.hist = hist
 	s.mediaQ = media.NewQueue(opts.SiteDir, s.onMediaEvent)
+	// The edit-time assistant (§12) exists only if a provider is configured
+	// outside the repo (env or config.toml). New returns nil otherwise, and the
+	// feature simply is not offered.
+	s.ai = ai.New(ai.Load())
 	if opts.PasswordHash != "" {
 		s.sessions = auth.NewSessions(12 * time.Hour)
 		s.limiter = auth.NewLimiter()
@@ -225,6 +231,7 @@ func (s *Server) routes() {
 	mux.HandleFunc("PUT /api/data/{table}", s.handleDataPut)
 	mux.HandleFunc("POST /api/media", s.handleMediaUpload)
 	mux.HandleFunc("POST /api/publish", s.handlePublish)
+	mux.HandleFunc("POST /api/ai/suggest", s.handleAISuggest)
 	mux.HandleFunc("GET /api/theme", s.handleThemeGet)
 	mux.HandleFunc("PUT /api/theme/tokens", s.handleTokensPut)
 	mux.HandleFunc("GET /api/theme/check", s.handleThemeCheck)
@@ -304,6 +311,7 @@ func (s *Server) handlePage(w http.ResponseWriter, r *http.Request) {
 		Blocks:  blocks.Schema(),
 		Meta:    pageMeta{Title: p.Title, Description: p.Description, OgImage: p.OgImage},
 		Publish: publish.Configured(snap.site.Publish),
+		AI:      s.ai != nil,
 	}
 	out, err := renderEditPage(snap.theme, snap.ldr, snap.site, p, s.opts.SiteDir, !snap.css.Empty(), cfg)
 	if err != nil {

@@ -43,6 +43,7 @@ type overlayConfig struct {
 	Blocks  map[string]blocks.BlockSchema `json:"blocks"`
 	Meta    pageMeta                      `json:"meta"`
 	Publish bool                          `json:"publish"` // site declares a publish method (§13)
+	AI      bool                          `json:"ai"`      // an AI provider is configured (§12)
 }
 
 // slotDecl is the slot subset the overlay needs.

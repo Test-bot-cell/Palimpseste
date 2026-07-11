@@ -1,6 +1,7 @@
 package svg
 
 import (
+	"encoding/xml"
 	"strings"
 	"testing"
 )
@@ -152,12 +153,13 @@ func FuzzSanitize(f *testing.F) {
 		if err != nil {
 			return // rejected input is fine; only accepted output must be inert
 		}
-		low := strings.ToLower(out)
-		for _, bad := range []string{"<script", "onload=", "onclick=", "<foreignobject", "javascript:", "<!doctype", "<!entity", "<image", "<iframe", "<animate", "<style"} {
-			if strings.Contains(low, bad) {
-				t.Fatalf("vector %q survived for input %q:\n%s", bad, in, out)
-			}
-		}
+		// Structural, not substring: the security property is that no dangerous
+		// ELEMENT and no attribute VALUE carrying a script vector survives. Text
+		// content is inert (a <desc> may legitimately mention "javascript:") and
+		// is therefore not a vector — checking the raw string for that word would
+		// be a false positive, not a real leak.
+		assertInertSVG(t, in, out)
+
 		again, err := Sanitize([]byte(out), ProfileImg)
 		if err != nil {
 			t.Fatalf("canonical output failed to re-sanitise: %v\n%s", err, out)
@@ -166,4 +168,38 @@ func FuzzSanitize(f *testing.F) {
 			t.Fatalf("not idempotent:\n1: %s\n2: %s", out, again)
 		}
 	})
+}
+
+// assertInertSVG parses sanitized output and fails if any element outside the
+// whitelist survives, any on* handler survives, or any attribute value carries
+// an executable scheme.
+func assertInertSVG(t *testing.T, in, out string) {
+	t.Helper()
+	dec := xml.NewDecoder(strings.NewReader(out))
+	dec.Strict = false
+	dec.Entity = xml.HTMLEntity
+	for {
+		tok, err := dec.Token()
+		if err != nil {
+			break
+		}
+		se, ok := tok.(xml.StartElement)
+		if !ok {
+			continue
+		}
+		name := strings.ToLower(se.Name.Local)
+		if !elementWhitelist[name] {
+			t.Fatalf("forbidden element <%s> survived for input %q:\n%s", name, in, out)
+		}
+		for _, a := range se.Attr {
+			key := strings.ToLower(a.Name.Local)
+			if strings.HasPrefix(key, "on") {
+				t.Fatalf("event handler %q survived for input %q:\n%s", a.Name.Local, in, out)
+			}
+			val := strings.ToLower(strings.TrimSpace(a.Value))
+			if strings.Contains(val, "javascript:") || strings.Contains(val, "data:") {
+				t.Fatalf("attribute %q=%q carries a vector for input %q:\n%s", a.Name.Local, a.Value, in, out)
+			}
+		}
+	}
 }

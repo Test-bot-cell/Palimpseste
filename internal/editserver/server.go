@@ -232,6 +232,8 @@ func (s *Server) routes() {
 	mux.HandleFunc("POST /api/media", s.handleMediaUpload)
 	mux.HandleFunc("POST /api/publish", s.handlePublish)
 	mux.HandleFunc("POST /api/ai/suggest", s.handleAISuggest)
+	mux.HandleFunc("GET /api/history/{page}/{slot}", s.handleHistoryGet)
+	mux.HandleFunc("POST /api/revert/{page}/{slot}", s.handleRevert)
 	mux.HandleFunc("GET /api/theme", s.handleThemeGet)
 	mux.HandleFunc("PUT /api/theme/tokens", s.handleTokensPut)
 	mux.HandleFunc("GET /api/theme/check", s.handleThemeCheck)

@@ -54,6 +54,18 @@ func (l *Loader) Fragment(pageID, slot string, overrides map[string]string) (htm
 	return string(raw), true, nil
 }
 
+// FragmentPath resolves the absolute path a slot's fragment lives at, without
+// reading or writing it — the history/revert layer needs the location to query
+// git. It applies the same ref/within confinement as Fragment (§14).
+func (l *Loader) FragmentPath(pageID, slot string, overrides map[string]string) (string, error) {
+	rel := ref(pageID, slot, overrides)
+	path := filepath.Join(l.root, rel+".html")
+	if !within(l.root, path) {
+		return "", fmt.Errorf("fragment %q escapes content root", rel)
+	}
+	return path, nil
+}
+
 // WriteFragment stores safeHTML as the fragment backing a page's slot. It
 // resolves the path through the same ref/within rules as Fragment (one source
 // of truth for where a slot lives), creates parent directories, and writes

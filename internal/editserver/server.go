@@ -35,6 +35,7 @@ import (
 	"palimpseste/internal/content"
 	"palimpseste/internal/css"
 	"palimpseste/internal/history"
+	"palimpseste/internal/media"
 	"palimpseste/internal/sanitize"
 	"palimpseste/internal/site"
 	"palimpseste/internal/theme"
@@ -67,11 +68,12 @@ type Options struct {
 // immutable snapshot swapped under mu on reload, so request handlers read a
 // coherent picture without holding a lock across a render.
 type Server struct {
-	opts Options
-	csrf string
-	hub  *hub
-	hist *history.Recorder
-	mux  *http.ServeMux
+	opts   Options
+	csrf   string
+	hub    *hub
+	hist   *history.Recorder
+	mediaQ *media.Queue
+	mux    *http.ServeMux
 
 	mu  sync.RWMutex
 	cur *snapshot
@@ -121,6 +123,7 @@ func New(opts Options) (*Server, error) {
 		return nil, err
 	}
 	s.hist = hist
+	s.mediaQ = media.NewQueue(opts.SiteDir, s.onMediaEvent)
 	s.routes()
 	return s, nil
 }
@@ -205,6 +208,7 @@ func (s *Server) routes() {
 	mux.HandleFunc("PUT /api/pages/{page}/meta", s.handleMetaPut)
 	mux.HandleFunc("GET /api/data/{table}", s.handleDataGet)
 	mux.HandleFunc("PUT /api/data/{table}", s.handleDataPut)
+	mux.HandleFunc("POST /api/media", s.handleMediaUpload)
 	mux.HandleFunc("GET /api/theme", s.handleThemeGet)
 	mux.HandleFunc("PUT /api/theme/tokens", s.handleTokensPut)
 	mux.HandleFunc("GET /api/theme/check", s.handleThemeCheck)
@@ -516,6 +520,9 @@ func (s *Server) Run(ctx context.Context) error {
 func (s *Server) Serve(ctx context.Context, ln net.Listener) error {
 	watchCtx, stopWatch := context.WithCancel(ctx)
 	defer stopWatch()
+	// The media queue lives exactly as long as the server: uploads accepted
+	// while serving, drained encoder work cancelled with it (§10.1).
+	s.mediaQ.Start(watchCtx)
 	if w, err := newWatcher(s.watchRoots()...); err != nil {
 		// A watcher failure degrades live-reload but must not stop editing:
 		// saves still work, the operator just refreshes by hand.

@@ -3,6 +3,10 @@ package editserver
 import (
 	"encoding/json"
 	"fmt"
+	"os"
+	"path"
+	"path/filepath"
+	"strings"
 
 	"golang.org/x/net/html"
 
@@ -69,6 +73,26 @@ func liveTables(siteDir string, t *theme.Theme) func(string) ([]string, [][]stri
 	}
 }
 
+// liveVariants probes media/derived for the responsive renditions of an
+// original (§10.1) — same shape as the build's resolver, read fresh per render.
+func liveVariants(siteDir string) func(string) []materialize.MediaVariant {
+	return func(src string) []materialize.MediaVariant {
+		const orig = "media/originals/"
+		if !strings.HasPrefix(src, orig) {
+			return nil
+		}
+		base := strings.TrimSuffix(path.Base(src), path.Ext(src))
+		var out []materialize.MediaVariant
+		for _, w := range []int{480, 800, 1200} {
+			rel := fmt.Sprintf("media/derived/%s-%d.webp", base, w)
+			if _, err := os.Stat(filepath.Join(siteDir, filepath.FromSlash(rel))); err == nil {
+				out = append(out, materialize.MediaVariant{Path: rel, Width: w})
+			}
+		}
+		return out
+	}
+}
+
 // pageEntry is one option in the overlay's page switcher.
 type pageEntry struct {
 	ID    string `json:"id"`
@@ -84,6 +108,7 @@ func renderEditPage(t *theme.Theme, ldr *content.Loader, s *site.Site, p site.Pa
 	doc, _, err := materialize.Page(t, ldr, p, materialize.Options{
 		KeepSlotMarkers: true,
 		Tables:          liveTables(siteDir, t),
+		Variants:        liveVariants(siteDir),
 	})
 	if err != nil {
 		return "", fmt.Errorf("materialize page %q: %w", p.ID, err)

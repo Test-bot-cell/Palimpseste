@@ -385,7 +385,10 @@ func renderPage(t *theme.Theme, ldr *content.Loader, s *site.Site, p site.Page, 
 // not the cache, needs). It is the one function whose output the cache stores,
 // so pageKey must hash every input it reads.
 func materializeRender(t *theme.Theme, ldr *content.Loader, s *site.Site, p site.Page, tables *tableResolver, styleHref string) ([]byte, *html.Node, materialize.Report, error) {
-	doc, rep, err := materialize.Page(t, ldr, p, materialize.Options{Tables: tables.resolve})
+	doc, rep, err := materialize.Page(t, ldr, p, materialize.Options{
+		Tables:   tables.resolve,
+		Variants: mediaVariants(tables.siteDir),
+	})
 	if err != nil {
 		return nil, nil, rep, fmt.Errorf("materialize page %q: %w", p.ID, err)
 	}

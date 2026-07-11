@@ -39,6 +39,16 @@ type Options struct {
 	// nil resolver, or an unresolved name, leaves the block container empty —
 	// the §4.1 graceful degradation, never a broken page.
 	Tables func(name string) (header []string, rows [][]string, ok bool)
+	// Variants lists the derived responsive renditions of a stored media path
+	// (§10.1); when present, the materializer emits srcset/sizes on the <img>.
+	// nil, or an empty answer, leaves the image as a single src.
+	Variants func(src string) []MediaVariant
+}
+
+// MediaVariant is one derived rendition offered to srcset.
+type MediaVariant struct {
+	Path  string // media/derived/<base>-<w>.webp
+	Width int
 }
 
 // Report records which slots the template asked for and whether each was
@@ -140,7 +150,7 @@ func Page(t *theme.Theme, ldr *content.Loader, p site.Page, opts Options) (*html
 
 	renderComputedBlocks(doc)
 	renderTableBlocks(doc, opts.Tables)
-	resolveMediaURLs(doc, p.Route)
+	resolveMediaURLs(doc, p.Route, opts.Variants)
 
 	return doc, rep, nil
 }
@@ -371,16 +381,28 @@ func slug(s string) string {
 // pages live at <route>/index.html, so a page one level deep needs "../" to
 // reach the site-root media/ tree. Pure function of the route: deterministic,
 // host-agnostic (no leading slash, so sub-path hosting keeps working).
-func resolveMediaURLs(doc *html.Node, route string) {
-	depth := routeDepth(route)
-	if depth == 0 {
-		return
-	}
-	prefix := strings.Repeat("../", depth)
+func resolveMediaURLs(doc *html.Node, route string, variants func(string) []MediaVariant) {
+	prefix := strings.Repeat("../", routeDepth(route))
 	for _, n := range render.FindAll(doc, func(n *html.Node) bool {
 		return n.Type == html.ElementNode && n.Data == "img"
 	}) {
-		if src, ok := render.GetAttr(n, "src"); ok && strings.HasPrefix(src, "media/") {
+		src, ok := render.GetAttr(n, "src")
+		if !ok || !strings.HasPrefix(src, "media/") {
+			continue
+		}
+		// Responsive renditions first (§10.1): srcset built from the canonical
+		// stored path, then every URL — src included — resolved to page depth.
+		if variants != nil {
+			if vs := variants(src); len(vs) > 0 {
+				var parts []string
+				for _, v := range vs {
+					parts = append(parts, fmt.Sprintf("%s%s %dw", prefix, v.Path, v.Width))
+				}
+				render.SetAttr(n, "srcset", strings.Join(parts, ", "))
+				render.SetAttr(n, "sizes", "100vw")
+			}
+		}
+		if prefix != "" {
 			render.SetAttr(n, "src", prefix+src)
 		}
 	}

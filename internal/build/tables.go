@@ -1,6 +1,11 @@
 package build
 
 import (
+	"fmt"
+	"os"
+	"path"
+	"path/filepath"
+	"strings"
 	"sync"
 
 	"palimpseste/internal/data"
@@ -47,6 +52,27 @@ func (r *tableResolver) table(name string) *data.Table {
 	}
 	r.loaded[name] = t
 	return t
+}
+
+// mediaVariants resolves derived renditions for srcset (§10.1) by probing
+// media/derived for the §10.1 widths of a stored original. Pure disk lookup —
+// the derived tree is part of the build's inputs like any other file.
+func mediaVariants(siteDir string) func(string) []materialize.MediaVariant {
+	return func(src string) []materialize.MediaVariant {
+		const orig = "media/originals/"
+		if !strings.HasPrefix(src, orig) {
+			return nil
+		}
+		base := strings.TrimSuffix(path.Base(src), path.Ext(src))
+		var out []materialize.MediaVariant
+		for _, w := range []int{480, 800, 1200} {
+			rel := fmt.Sprintf("media/derived/%s-%d.webp", base, w)
+			if _, err := os.Stat(filepath.Join(siteDir, filepath.FromSlash(rel))); err == nil {
+				out = append(out, materialize.MediaVariant{Path: rel, Width: w})
+			}
+		}
+		return out
+	}
 }
 
 // resolve adapts the resolver to materialize.Options.Tables.

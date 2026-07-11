@@ -1,0 +1,17 @@
+{
+  "name": "atelier",
+  "version": "0.1.0",
+  "slots": {
+    "nav": { "type": "nav" },
+    "hero": { "type": "richtext" },
+    "main": { "type": "richtext", "blocks": ["gallery", "columns", "cta", "toc", "table"] },
+    "footer": { "type": "richtext" }
+  },
+  "styles": ["styles/tokens.css", "styles/base.css"],
+  "tokens": {
+    "--ink": { "type": "color" },
+    "--paper": { "type": "color" },
+    "--accent": { "type": "color" },
+    "--rhythm": { "type": "length" }
+  }
+}

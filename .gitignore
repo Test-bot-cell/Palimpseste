@@ -1,0 +1,42 @@
+# Palimpseste — .gitignore
+#
+# Principe (§3 du document d'architecture) : les sources de vérité se
+# committent, les artefacts se régénèrent. public/ et builds/ sont des vues
+# matérialisées — jamais éditées à la main, toujours reconstructibles bit à
+# bit depuis content/ + data/ + themes/ ; les ignorer est un choix par site
+# (§13), celui des exemples de ce dépôt est de ne pas les versionner.
+
+# --- artefacts de build -----------------------------------------------------
+/dist/
+/palimpseste
+/examples/*/public
+/examples/*/builds
+/examples/*/.palimpseste
+.palimpseste/
+*.staging-*
+*.bak
+
+# --- Go ----------------------------------------------------------------------
+go.work
+go.work.sum
+coverage.out
+*.test
+*.prof
+
+# NB : internal/*/testdata/ (goldens, corpus de fuzz) se committe — ce sont
+# des fixtures de régression, pas des artefacts.
+
+# --- éditeurs et IDE ----------------------------------------------------------
+*.swp
+*.swo
+*~
+.idea/
+.vscode/
+
+# --- système ------------------------------------------------------------------
+.DS_Store
+Thumbs.db
+
+# --- brouillons locaux ---------------------------------------------------------
+/tmp/
+*.out

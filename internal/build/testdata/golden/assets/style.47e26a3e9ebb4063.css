@@ -1,0 +1,1 @@
+:root{--ink: oklch(.22 .02 250);--paper: oklch(.98 .01 250);--accent: oklch(.58 .15 250);--measure: 68ch}@layer base{body{margin:0;color:var(--ink);background:var(--paper);font:16px/1.6 system-ui,sans-serif}main{max-inline-size:var(--measure);margin-inline:auto;padding:2rem 1rem}a{color:var(--accent)}.hero h1{font-size:clamp(2rem,5vw,3.5rem);line-height:1.1}}

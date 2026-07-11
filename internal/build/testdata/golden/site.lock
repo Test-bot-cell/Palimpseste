@@ -1,0 +1,10 @@
+{
+  "palimpseste": "test",
+  "theme": {
+    "name": "drake",
+    "version": "0.2.0",
+    "hash": "13406981fd6e2301da76f9d1d0020dbdcfe90a2167c3ea66cd4f2a0102c86749"
+  },
+  "contentHash": "bbff29a05cce7a387189da9c370b6a9afe40fc5adebe5e3d03dbf7d86132141a",
+  "pages": 2
+}

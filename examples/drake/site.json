@@ -1,0 +1,35 @@
+{
+  "name": "Drake OS",
+  "baseURL": "https://drakeos.org",
+  "lang": "en",
+  "theme": "drake",
+  "organization": {
+    "name": "DistroForge",
+    "url": "https://distroforge.dev",
+    "logo": "/assets/logo.svg"
+  },
+  "pages": [
+    {
+      "id": "home",
+      "route": "/",
+      "template": "page",
+      "title": "Drake OS — a calm, fast Linux",
+      "description": "Drake OS is a reproducible, privacy-respecting Linux distribution forged by DistroForge for calm, auditable computing.",
+      "slots": {
+        "nav": "_global:nav",
+        "footer": "_global:footer"
+      }
+    },
+    {
+      "id": "about",
+      "route": "/about",
+      "template": "page",
+      "title": "About Drake OS",
+      "description": "The story behind Drake OS and the DistroForge trident that forges, ships, and publishes it as static files.",
+      "slots": {
+        "nav": "_global:nav",
+        "footer": "_global:footer"
+      }
+    }
+  ]
+}

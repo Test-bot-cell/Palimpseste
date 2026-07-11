@@ -1,0 +1,7 @@
+/* tokens.css — réécrit par le panneau de thème (§6). */
+:root {
+  --ink: oklch(0.25 0.03 40);
+  --paper: oklch(0.97 0.02 85);
+  --accent: oklch(0.55 0.16 30);
+  --rhythm: 1.5rem;
+}

@@ -1,0 +1,84 @@
+/* atelier — un second thème de démonstration en CSS natif pur (la preuve par
+   deux, §18) : même contrat de slots que drake, mise en page distincte. Aucun
+   framework — custom properties, @layer, oklch, clamp. */
+@layer base, layout, blocks;
+
+@layer base {
+  body {
+    margin: 0;
+    color: var(--ink);
+    background: var(--paper);
+    font: 17px/1.7 Georgia, "Times New Roman", serif;
+  }
+
+  a {
+    color: var(--accent);
+    text-underline-offset: 2px;
+  }
+
+  h1, h2, h3 {
+    font-family: system-ui, sans-serif;
+    line-height: 1.15;
+  }
+}
+
+@layer layout {
+  .frame {
+    max-inline-size: 46rem;
+    margin-inline: auto;
+    padding-inline: 1.25rem;
+  }
+
+  .masthead {
+    border-block-end: 2px solid var(--ink);
+    padding-block: var(--rhythm);
+  }
+
+  .masthead nav {
+    display: flex;
+    gap: 1rem;
+    font-family: system-ui, sans-serif;
+    font-size: 0.9rem;
+    letter-spacing: 0.02em;
+    text-transform: uppercase;
+  }
+
+  .hero h1 {
+    font-size: clamp(2.2rem, 6vw, 4rem);
+    margin-block: 0.5em 0.2em;
+  }
+
+  .prose {
+    padding-block: calc(var(--rhythm) * 1.5);
+  }
+
+  .prose > * + * {
+    margin-block-start: var(--rhythm);
+  }
+
+  .colophon {
+    border-block-start: 1px solid color-mix(in oklch, var(--ink) 30%, transparent);
+    padding-block: var(--rhythm);
+    font-size: 0.85rem;
+    font-family: system-ui, sans-serif;
+  }
+}
+
+@layer blocks {
+  [data-block="cta"] {
+    background: color-mix(in oklch, var(--accent) 12%, var(--paper));
+    border-inline-start: 3px solid var(--accent);
+    padding: var(--rhythm);
+  }
+
+  [data-block="columns"] {
+    display: grid;
+    grid-template-columns: repeat(var(--cols, 2), 1fr);
+    gap: var(--rhythm);
+  }
+
+  [data-block="toc"] {
+    font-family: system-ui, sans-serif;
+    font-size: 0.9rem;
+  }
+}

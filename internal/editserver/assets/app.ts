@@ -39,6 +39,7 @@ type OverlayConfig = {
   blocks: Record<string, BlockSchema>;
   meta: PageMeta;
   publish: boolean;
+  ai: boolean;
 };
 
 const cfgEl = document.getElementById("_pal-config");
@@ -56,6 +57,7 @@ const state = {
   dirty: new Set<string>(),
   saving: false,
   ignoreReloadUntil: 0, // suppress our own save-triggered reload
+  activeSlot: "", // last region the author touched — the history panel's target
 };
 
 // ---- affordances d'édition (styles inline sur nœuds du template) -------------
@@ -150,6 +152,7 @@ shadow.innerHTML = `
     </span>
     <button id="btn-theme" title="Thème et tokens">Thème</button>
     <button id="btn-seo" title="Référencement de la page">SEO</button>
+    <button id="btn-history" title="Historique de la région (§13)">Historique</button>
     <button id="btn-check" title="Vérifier la qualité (§11)">Vérifier</button>
     <button id="btn-publish" title="Publier vers le dépôt distant" hidden>Publier</button>
     <span class="status" id="status">prêt</span>
@@ -262,6 +265,7 @@ for (const region of regions) {
 
   region.addEventListener("focus", () => {
     fmtEl.hidden = plain; // la mise en forme n'existe pas pour du texte nu
+    state.activeSlot = slot;
     paintRegion(region);
   });
   region.addEventListener("blur", () => paintRegion(region));
@@ -372,6 +376,7 @@ function esc(s: string): string {
 byId("btn-theme").addEventListener("click", () => togglePanel("theme", renderThemePanel));
 byId("btn-seo").addEventListener("click", () => togglePanel("seo", renderSEOPanel));
 byId("btn-check").addEventListener("click", () => togglePanel("check", renderCheckPanel));
+byId("btn-history").addEventListener("click", () => togglePanel("history", renderHistoryPanel));
 const publishBtn = byId("btn-publish") as HTMLButtonElement;
 if (CFG.publish) {
   publishBtn.hidden = false;
@@ -498,15 +503,21 @@ function showReport(rep: any): void {
 
 function renderSEOPanel(): void {
   const m = CFG.meta || { title: "", description: "" };
+  // « Suggérer » n'apparaît que si un fournisseur IA est configuré (§12).
+  const suggestT = CFG.ai ? `<button id="seo-suggest-t" title="Proposer des titres (IA)">Suggérer</button>` : "";
+  const suggestD = CFG.ai ? `<button id="seo-suggest-d" title="Proposer une description (IA)">Suggérer</button>` : "";
   panelEl.innerHTML = `
     <h2>Référencement — ${esc(CFG.page)}</h2>
     <div class="row"><label>Titre</label><input class="full" id="seo-title" type="text" value="${esc(m.title)}" maxlength="70"><span class="val" id="seo-title-n"></span></div>
+    ${suggestT ? `<div class="row"><span></span><span>${suggestT}</span><span></span></div>` : ""}
     <div class="row"><label>Description</label><textarea id="seo-desc" maxlength="180">${esc(m.description)}</textarea><span class="val" id="seo-desc-n"></span></div>
+    ${suggestD ? `<div class="row"><span></span><span>${suggestD}</span><span></span></div>` : ""}
     <div class="row"><label>og:image</label><input class="full" id="seo-og" type="text" value="${esc(m.ogImage || "")}" placeholder="media/… ou https://…"><span class="val"></span></div>
     <div class="serp">
       <div class="t" id="serp-t"></div><div class="u">${esc(location.origin)}${esc(location.pathname)}</div><div class="d" id="serp-d"></div>
     </div>
-    <p class="hint">Titre ≤ 60, description 50–160 : au-delà, l'aperçu vire à l'ambre (mêmes règles que le lint §11).</p>
+    <div id="ai-proposals"></div>
+    <p class="hint">Titre ≤ 60, description 50–160 : au-delà, l'aperçu vire à l'ambre (mêmes règles que le lint §11).${CFG.ai ? " Les suggestions IA sont des propositions — rien n'est appliqué sans votre clic." : ""}</p>
     <button id="seo-save">Enregistrer le référencement</button>`;
 
   const titleEl = byId("seo-title") as HTMLInputElement;
@@ -523,6 +534,52 @@ function renderSEOPanel(): void {
   descEl.addEventListener("input", refresh);
   refresh();
   byId("seo-save").addEventListener("click", saveSEO);
+
+  // Suggestions IA (advisory-only) : on affiche les propositions, l'auteur
+  // clique pour en adopter une — c'est ce clic qui remplit le champ, jamais l'IA.
+  byId("seo-suggest-t")?.addEventListener("click", () =>
+    suggest("title", (props) => showProposals(props, (p) => { titleEl.value = p; refresh(); })),
+  );
+  byId("seo-suggest-d")?.addEventListener("click", () =>
+    suggest("description", (props) => showProposals(props, (p) => { descEl.value = p; refresh(); })),
+  );
+}
+
+// suggest asks the assistant and hands the proposals to a renderer. It never
+// writes anything itself (§12).
+async function suggest(kind: string, onProposals: (props: string[]) => void, extra: Record<string, string> = {}): Promise<void> {
+  setStatus("suggestion IA…");
+  const res = await fetch(`${API}/ai/suggest`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json", "X-Pal-CSRF": CFG.csrf },
+    body: JSON.stringify({ kind, page: CFG.page, ...extra }),
+  });
+  if (!res.ok) {
+    setStatus("suggestion refusée : " + (await res.text()).slice(0, 120), "error");
+    return;
+  }
+  const data = await res.json();
+  if (!data.proposals?.length) {
+    setStatus("aucune proposition", "error");
+    return;
+  }
+  setStatus("propositions prêtes — cliquez pour adopter", "saved");
+  onProposals(data.proposals);
+}
+
+function showProposals(props: string[], onAdopt: (p: string) => void): void {
+  const box = byId("ai-proposals");
+  if (!box) return;
+  box.innerHTML =
+    `<p class="hint">Propositions (cliquez pour adopter) :</p>` +
+    props.map((p, i) => `<div class="find" data-prop="${i}" style="cursor:pointer">${esc(p)}</div>`).join("");
+  props.forEach((p, i) => {
+    box.querySelector(`[data-prop="${i}"]`)?.addEventListener("click", () => {
+      onAdopt(p);
+      box.innerHTML = "";
+      setStatus("proposition adoptée — pensez à enregistrer", "dirty");
+    });
+  });
 }
 
 function setCounter(el: Element, n: number, max: number, min = 0): void {
@@ -561,6 +618,57 @@ async function renderCheckPanel(): Promise<void> {
     ? issues.map((i) => `<div class="find ${esc(i.severity)}">[${esc(i.severity)}] ${esc(i.page)} · ${esc(i.rule)} : ${esc(i.detail)}</div>`).join("")
     : `<p class="hint">Aucun problème détecté. Core Web Vitals par construction (§11).</p>`;
   panelEl.innerHTML = `<h2>Vérification qualité <span class="val">${rep.ms} ms</span></h2>${body}`;
+}
+
+// ---- panneau Historique (§13) : les révisions d'une région, restaurer ----------
+
+async function renderHistoryPanel(): Promise<void> {
+  const slot = state.activeSlot;
+  if (!slot) {
+    panelEl.innerHTML = `<h2>Historique</h2><p class="hint">Cliquez d'abord dans une région éditable, puis rouvrez l'historique.</p>`;
+    return;
+  }
+  panelEl.innerHTML = `<h2>Historique — ${esc(slot)}</h2><p class="hint">Chargement…</p>`;
+  const url = `${API}/history/${encodeURIComponent(CFG.page)}/${encodeURIComponent(slot)}`;
+  const data = await fetch(url).then((r) => r.json());
+  if (!data.enabled) {
+    panelEl.innerHTML = `<h2>Historique — ${esc(slot)}</h2><p class="hint">Ce site n'est pas versionné (git) : pas d'historique.</p>`;
+    return;
+  }
+  const revs = (data.revisions || []) as any[];
+  const body = revs.length
+    ? revs
+        .map(
+          (rv) =>
+            `<div class="find" style="display:flex;gap:.5rem;align-items:center">
+               <code style="opacity:.7">${esc(rv.hash.slice(0, 7))}</code>
+               <span style="flex:1">${esc(rv.message)} <span class="val">${esc(rv.when)} · ${esc(rv.author)}</span></span>
+               <button data-revert="${esc(rv.hash)}">Restaurer</button>
+             </div>`,
+        )
+        .join("")
+    : `<p class="hint">Aucune révision enregistrée pour cette région.</p>`;
+  panelEl.innerHTML = `<h2>Historique — ${esc(slot)}</h2>
+    <p class="hint">Restaurer réécrit la région par le chemin normal (re-sanitisée, commit dédié) — c'est une édition ordinaire, pas une réécriture de l'histoire.</p>${body}`;
+  for (const b of panelEl.querySelectorAll<HTMLButtonElement>("[data-revert]")) {
+    b.addEventListener("click", () => revertSlot(slot, b.dataset.revert!));
+  }
+}
+
+async function revertSlot(slot: string, hash: string): Promise<void> {
+  if (!confirm(`Restaurer « ${slot} » à la révision ${hash.slice(0, 7)} ?`)) return;
+  setStatus("restauration…");
+  const res = await fetch(`${API}/revert/${encodeURIComponent(CFG.page)}/${encodeURIComponent(slot)}`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json", "X-Pal-CSRF": CFG.csrf },
+    body: JSON.stringify({ hash }),
+  });
+  if (res.ok) {
+    setStatus("région restaurée — rechargement…", "saved");
+    setTimeout(() => location.reload(), 400);
+  } else {
+    setStatus("restauration refusée : " + (await res.text()).slice(0, 120), "error");
+  }
 }
 
 // ---- éditeur de slot stack (§5.1/§9) : liste réordonnable + config de blocs -----
@@ -673,11 +781,27 @@ function initImageRegion(region: HTMLElement, slot: string): void {
   region.style.cursor = "pointer";
   region.title = "Cliquer pour changer l'image";
   region.addEventListener("click", (e) => {
+    // Ne pas ré-ouvrir le sélecteur quand on clique le bouton « Suggérer un alt ».
+    if ((e.target as HTMLElement).hasAttribute("data-pal-alt")) return;
     e.preventDefault();
     openMediaPicker((mediaPath) => {
-      region.innerHTML = `<figure><img src="${esc(mediaPath)}" alt=""></figure>`;
+      const altBtn = CFG.ai
+        ? `<button type="button" data-pal-alt data-pal-ui style="margin-top:.3rem;cursor:pointer">Suggérer un alt (IA)</button>`
+        : "";
+      region.innerHTML = `<figure><img src="${esc(mediaPath)}" alt=""></figure>${altBtn}`;
       markDirty(slot);
       paintRegion(region);
+      region.querySelector("[data-pal-alt]")?.addEventListener("click", (ev) => {
+        ev.preventDefault();
+        suggest("alt", (props) => {
+          const img = region.querySelector("img");
+          if (img && props[0]) {
+            img.setAttribute("alt", props[0]);
+            setStatus("alt adopté : « " + props[0].slice(0, 40) + " » — enregistrez", "dirty");
+            markDirty(slot);
+          }
+        }, { src: mediaPath });
+      });
     });
   });
 }

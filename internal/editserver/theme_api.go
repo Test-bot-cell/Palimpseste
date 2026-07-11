@@ -19,6 +19,7 @@ import (
 
 	"palimpseste/internal/lint"
 	"palimpseste/internal/materialize"
+	"palimpseste/internal/publish"
 	"palimpseste/internal/sanitize"
 	"palimpseste/internal/seo"
 	"palimpseste/internal/site"
@@ -343,4 +344,27 @@ func (s *Server) handleCheck(w http.ResponseWriter, r *http.Request) {
 		})
 	}
 	writeJSON(w, http.StatusOK, out)
+}
+
+// --- POST /api/publish (§13) -------------------------------------------------------
+
+// handlePublish is the explicit deployment act, decoupled from saving. It runs
+// the site's declared publish method (git-push in V1) with credentials from the
+// environment — never the repo — and reports the outcome.
+func (s *Server) handlePublish(w http.ResponseWriter, r *http.Request) {
+	if !s.authorizeWrite(w, r) {
+		return
+	}
+	st := s.current().site
+	if !publish.Configured(st.Publish) {
+		http.Error(w, "no publish method configured in site.json (§13)", http.StatusBadRequest)
+		return
+	}
+	res, err := publish.Run(s.opts.SiteDir, st.Publish)
+	if err != nil {
+		s.hub.broadcast(event{Name: "error", Data: "publish: " + err.Error()})
+		http.Error(w, err.Error(), http.StatusBadGateway)
+		return
+	}
+	writeJSON(w, http.StatusOK, res)
 }

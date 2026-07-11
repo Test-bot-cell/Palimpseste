@@ -42,6 +42,8 @@ func main() {
 		os.Exit(cmdTheme(os.Args[2:]))
 	case "passwd":
 		os.Exit(cmdPasswd(os.Args[2:]))
+	case "publish":
+		os.Exit(cmdPublish(os.Args[2:]))
 	case "version", "--version", "-version":
 		fmt.Printf("palimpseste %s\n", version)
 	case "help", "-h", "--help":
@@ -64,6 +66,7 @@ usage:
   palimpseste theme check [flags] <name>    compatibility report (§5.3)
   palimpseste theme apply [flags] <name>    check, migrate, switch, commit
   palimpseste passwd                        hash an admin password for edit --listen
+  palimpseste publish [flags]               deploy per site.json (git-push) (§13)
   palimpseste version              print version
   palimpseste help                 show this help
 

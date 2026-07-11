@@ -20,6 +20,16 @@ type Site struct {
 	Theme        string       `json:"theme"`
 	Pages        []Page       `json:"pages"`
 	Organization Organization `json:"organization,omitempty"`
+	Publish      Publish      `json:"publish,omitempty"`
+}
+
+// Publish declares how `POST /api/publish` deploys the site (§13). The method
+// is committed; the credentials are not — they live in the environment. V1
+// speaks git-push (branch under a remote, e.g. a Pages branch).
+type Publish struct {
+	Method string `json:"method,omitempty"` // "git-push" (V1)
+	Remote string `json:"remote,omitempty"` // git remote name, e.g. "origin"
+	Branch string `json:"branch,omitempty"` // target branch, e.g. "pages"
 }
 
 // Page is a single materialized route.

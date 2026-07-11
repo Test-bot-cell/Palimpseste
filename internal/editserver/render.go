@@ -17,6 +17,7 @@ import (
 	"palimpseste/internal/render"
 	"palimpseste/internal/seo"
 	"palimpseste/internal/site"
+	"palimpseste/internal/svg"
 	"palimpseste/internal/theme"
 )
 
@@ -109,6 +110,7 @@ func renderEditPage(t *theme.Theme, ldr *content.Loader, s *site.Site, p site.Pa
 		KeepSlotMarkers: true,
 		Tables:          liveTables(siteDir, t),
 		Variants:        liveVariants(siteDir),
+		InlineSVG:       svg.InlineResolver(siteDir, t),
 	})
 	if err != nil {
 		return "", fmt.Errorf("materialize page %q: %w", p.ID, err)

@@ -13,10 +13,38 @@ import (
 	"io"
 	"log"
 	"net/http"
+	"os"
 	"path/filepath"
 
 	"palimpseste/internal/media"
+	"palimpseste/internal/svg"
 )
+
+// ingestSVG sanitises an uploaded SVG to the img profile (§10.2) and stores it
+// under media/originals, committed and republished like any media write.
+func (s *Server) ingestSVG(w http.ResponseWriter, filename string, raw []byte) {
+	clean, err := svg.Sanitize(raw, svg.ProfileImg)
+	if err != nil {
+		http.Error(w, "invalid SVG: "+err.Error(), http.StatusUnsupportedMediaType)
+		return
+	}
+	base := media.SlugBase(filename)
+	rel := filepath.ToSlash(filepath.Join("media", "originals", base+".svg"))
+	abs := filepath.Join(s.opts.SiteDir, filepath.FromSlash(rel))
+	if err := os.MkdirAll(filepath.Dir(abs), 0o755); err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+	if err := os.WriteFile(abs, []byte(clean), 0o644); err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+	s.record(abs, fmt.Sprintf("media(%s.svg)", base))
+	s.rebuild()
+	payload, _ := json.Marshal(media.Event{ID: "svg", Result: &media.Result{Original: rel}})
+	s.hub.broadcast(event{Name: "media", Data: string(payload)})
+	writeJSON(w, http.StatusOK, map[string]string{"original": rel})
+}
 
 func (s *Server) handleMediaUpload(w http.ResponseWriter, r *http.Request) {
 	if !s.authorizeWrite(w, r) {
@@ -37,6 +65,12 @@ func (s *Server) handleMediaUpload(w http.ResponseWriter, r *http.Request) {
 	}
 	if int64(len(raw)) > media.MaxUploadBytes {
 		http.Error(w, fmt.Sprintf("upload exceeds %d MiB", media.MaxUploadBytes>>20), http.StatusRequestEntityTooLarge)
+		return
+	}
+	// SVG has no magic bytes (§10.2): it is a document, sanitised synchronously
+	// (fast, no raster pipeline) and stored under media/ straight away.
+	if svg.LooksLikeSVG(raw) {
+		s.ingestSVG(w, header.Filename, raw)
 		return
 	}
 	if err := media.ValidUpload(raw); err != nil {

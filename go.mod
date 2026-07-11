@@ -32,9 +32,12 @@ require (
 	github.com/rwcarlsen/goexif v0.0.0-20190401172101-9e8deecbddbd // indirect
 	github.com/sergi/go-diff v1.3.2-0.20230802210424-5b0b94c5c0d3 // indirect
 	github.com/skeema/knownhosts v1.3.1 // indirect
+	github.com/srwiley/oksvg v0.0.0-20221011165216-be6e8873101c // indirect
+	github.com/srwiley/rasterx v0.0.0-20220730225603-2ab79fcdd4ef // indirect
 	github.com/xanzy/ssh-agent v0.3.3 // indirect
 	golang.org/x/crypto v0.50.0 // indirect
-	golang.org/x/image v0.0.0-20191009234506-e7c1f5e7dbb8 // indirect
+	golang.org/x/image v0.0.0-20211028202545-6944b10bf410 // indirect
 	golang.org/x/sys v0.43.0 // indirect
+	golang.org/x/text v0.36.0 // indirect
 	gopkg.in/warnings.v0 v0.1.2 // indirect
 )

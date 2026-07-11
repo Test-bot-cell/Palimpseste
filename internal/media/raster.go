@@ -231,6 +231,10 @@ func encodeOriginal(img image.Image, format string) ([]byte, error) {
 	return buf.Bytes(), nil
 }
 
+// SlugBase is exported for callers (the SVG path) that need the same basename
+// discipline without running the raster pipeline.
+func SlugBase(filename string) string { return slugBase(filename) }
+
 // slugBase reduces an upload's filename to a safe media basename: lowercase
 // letters, digits and dashes — the same shape the §14 identifier discipline
 // likes, and a URL that never needs escaping.

@@ -162,3 +162,26 @@ func TestTableBlockDegradesWithoutSource(t *testing.T) {
 		t.Errorf("unresolved table block should render as its empty container:\n%s", out)
 	}
 }
+
+// §10.2: an inline image slot's SVG is embedded (fill="currentColor" kept), the
+// <img> replaced — the logo mechanism.
+func TestInlineSVGLogo(t *testing.T) {
+	tm, ldr := tocFixture(t, `<figure><img src="media/logo.svg" alt="logo"/></figure>`)
+	resolve := func(slot, src string) (string, bool) {
+		if src == "media/logo.svg" {
+			return `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 10 10"><path d="M0 0h10v10H0z" fill="currentColor"/></svg>`, true
+		}
+		return "", false
+	}
+	doc, _, err := Page(tm, ldr, site.Page{ID: "pg", Template: "p", Route: "/"}, Options{InlineSVG: resolve})
+	if err != nil {
+		t.Fatal(err)
+	}
+	out, _ := render.Render(doc)
+	if strings.Contains(out, "<img") {
+		t.Errorf("img not replaced by inline svg:\n%s", out)
+	}
+	if !strings.Contains(out, `fill="currentColor"`) || !strings.Contains(out, "<svg") {
+		t.Errorf("inline svg not embedded:\n%s", out)
+	}
+}

@@ -43,6 +43,11 @@ type Options struct {
 	// (§10.1); when present, the materializer emits srcset/sizes on the <img>.
 	// nil, or an empty answer, leaves the image as a single src.
 	Variants func(src string) []MediaVariant
+	// InlineSVG resolves an inline image slot's SVG (§10.2): given the slot name
+	// and the media src its fragment references, it returns the sanitized inline
+	// SVG (fill="currentColor") to embed in place of the <img>. ok=false leaves
+	// the fragment untouched — the logo mechanism, and nothing else.
+	InlineSVG func(slotName, src string) (svg string, ok bool)
 }
 
 // MediaVariant is one derived rendition offered to srcset.
@@ -139,6 +144,9 @@ func Page(t *theme.Theme, ldr *content.Loader, p site.Page, opts Options) (*html
 				return nil, Report{}, fmt.Errorf("parse fragment for slot %q: %w", name, err)
 			}
 			render.ReplaceChildren(el, nodes)
+			if opts.InlineSVG != nil {
+				inlineSVGSlot(el, name, opts.InlineSVG)
+			}
 			rep.Filled = append(rep.Filled, name)
 		} else {
 			rep.Missing = append(rep.Missing, name)
@@ -372,6 +380,45 @@ func slug(s string) string {
 		}
 	}
 	return strings.TrimRight(b.String(), "-")
+}
+
+// inlineSVGSlot replaces a slot's single <img src="media/….svg"> with the
+// inline SVG the resolver returns (§10.2): the logo, embedded so it inherits
+// the theme's currentColor. A slot the resolver declines is left as-is.
+func inlineSVGSlot(el *html.Node, slot string, resolve func(string, string) (string, bool)) {
+	var img *html.Node
+	count := 0
+	render.Walk(el, func(n *html.Node) {
+		if n.Type == html.ElementNode && n.Data == "img" {
+			img = n
+			count++
+		}
+	})
+	if count != 1 || img == nil {
+		return
+	}
+	src, ok := render.GetAttr(img, "src")
+	if !ok {
+		return
+	}
+	svgText, ok := resolve(slot, src)
+	if !ok {
+		return
+	}
+	// Parse the sanitized SVG and graft its root in place of the <img>.
+	nodes, err := render.ParseFragment(svgText, el)
+	if err != nil || len(nodes) == 0 {
+		return
+	}
+	parent := img.Parent
+	if parent == nil {
+		return
+	}
+	for _, n := range nodes {
+		render.Detach(n)
+		parent.InsertBefore(n, img)
+	}
+	parent.RemoveChild(img)
 }
 
 // --- media resolution (§4) -------------------------------------------------------

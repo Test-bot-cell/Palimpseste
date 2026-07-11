@@ -39,7 +39,7 @@ func BenchmarkMaterializePage(b *testing.B) {
 	p := s.SortedPages()[0]
 	b.ReportAllocs()
 	for b.Loop() {
-		if _, _, _, err := materializeRender(t, ldr, s, p, tables, "/assets/x.css"); err != nil {
+		if _, _, _, err := materializeRender(t, ldr, s, p, tables, false, "/assets/x.css"); err != nil {
 			b.Fatal(err)
 		}
 	}
@@ -88,7 +88,7 @@ func TestBudgetMaterializationPerPage(t *testing.T) {
 	tables := newTableResolver(dir, tm)
 	p := s.SortedPages()[0]
 	best := bestOf(20, func() {
-		if _, _, _, err := materializeRender(tm, ldr, s, p, tables, "/assets/x.css"); err != nil {
+		if _, _, _, err := materializeRender(tm, ldr, s, p, tables, false, "/assets/x.css"); err != nil {
 			t.Fatal(err)
 		}
 	})

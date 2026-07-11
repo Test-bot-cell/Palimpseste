@@ -36,6 +36,7 @@ import (
 	"palimpseste/internal/render"
 	"palimpseste/internal/seo"
 	"palimpseste/internal/site"
+	"palimpseste/internal/svg"
 	"palimpseste/internal/theme"
 )
 
@@ -135,6 +136,17 @@ func Run(opts Options) (*Result, error) {
 		res.Assets = append(res.Assets, bundle.Filename)
 	}
 
+	// Media and favicons are page inputs (media/ carried, favicons derived from
+	// the inline logo, §10.1/§10.2) — emitted before materialising so every page
+	// head can link the favicon set at its route depth.
+	if err := copyMediaDir(filepath.Join(opts.SiteDir, "media"), filepath.Join(staging, "media")); err != nil {
+		return nil, err
+	}
+	hasFavicons, err := emitFavicons(opts.SiteDir, t, ldr, s, staging)
+	if err != nil {
+		return nil, err
+	}
+
 	// Materialize pages in parallel over a bounded pool (§7), each writing its
 	// own output file, then merge results in sorted page order so issue
 	// ordering and the returned error stay deterministic regardless of which
@@ -152,7 +164,7 @@ func Run(opts Options) (*Result, error) {
 		go func(i int) {
 			defer wg.Done()
 			defer func() { <-sem }()
-			outs[i] = renderPage(t, ldr, s, pages[i], cache, tables, styleHref, staging, opts, routes)
+			outs[i] = renderPage(t, ldr, s, pages[i], cache, tables, hasFavicons, styleHref, staging, opts, routes)
 		}(i)
 	}
 	wg.Wait()
@@ -174,12 +186,6 @@ func Run(opts Options) (*Result, error) {
 		return nil, err
 	}
 	if err := writeFile(filepath.Join(staging, "robots.txt"), robotsTXT(s)); err != nil {
-		return nil, err
-	}
-	// Fragments reference images as media/<path> (§4); the published tree must
-	// carry them. Copied verbatim — the derivation pipeline (WebP variants,
-	// §10.1) arrives at M3 and will populate media/derived the same way.
-	if err := copyMediaDir(filepath.Join(opts.SiteDir, "media"), filepath.Join(staging, "media")); err != nil {
 		return nil, err
 	}
 
@@ -291,6 +297,91 @@ func publish(siteDir, staging string) (string, error) {
 	return target, nil
 }
 
+// repeatDotDot returns the ../ prefix a page at route needs to reach the site
+// root, mirroring the materializer's media resolution.
+func repeatDotDot(route string) string {
+	clean := strings.Trim(route, "/")
+	if clean == "" {
+		return ""
+	}
+	return strings.Repeat("../", strings.Count(clean, "/")+1)
+}
+
+// logoDigest returns a short content-address of the inline logo SVG so a logo
+// edit invalidates the favicon-bearing pages' cache entries.
+func logoDigest(siteDir string, t *theme.Theme, ldr *content.Loader, p site.Page) string {
+	src, ok := svg.LogoSource(siteDir, t, func(slot string) (string, bool) {
+		body, found, err := ldr.Fragment(p.ID, slot, p.Slots)
+		if err != nil || !found {
+			// _global slots resolve the same for every page; fall back to a
+			// convention read so a logo in _global is seen.
+			body, found, err = ldr.Fragment("_global", slot, nil)
+		}
+		return body, err == nil && found
+	})
+	if !ok {
+		return ""
+	}
+	b, err := os.ReadFile(filepath.Join(siteDir, filepath.FromSlash(src)))
+	if err != nil {
+		return src
+	}
+	h := sha256.Sum256(b)
+	return src + ":" + hex.EncodeToString(h[:8])
+}
+
+// emitFavicons derives the favicon set from the site's inline logo SVG (§10.2)
+// and writes it at the staging root. It reports whether a set was produced, so
+// pages know to link it. No logo → no favicons, silently.
+func emitFavicons(siteDir string, t *theme.Theme, ldr *content.Loader, s *site.Site, staging string) (bool, error) {
+	var logoSrc string
+	var found bool
+	for _, p := range s.SortedPages() {
+		if src, ok := svg.LogoSource(siteDir, t, func(slot string) (string, bool) {
+			body, f, err := ldr.Fragment(p.ID, slot, p.Slots)
+			if err != nil || !f {
+				body, f, err = ldr.Fragment("_global", slot, nil)
+			}
+			return body, err == nil && f
+		}); ok {
+			logoSrc, found = src, true
+			break
+		}
+	}
+	if !found {
+		return false, nil
+	}
+	raw, err := os.ReadFile(filepath.Join(siteDir, filepath.FromSlash(logoSrc)))
+	if err != nil {
+		return false, nil
+	}
+	clean, err := svg.Sanitize(raw, svg.ProfileImg)
+	if err != nil {
+		return false, nil
+	}
+	files, err := svg.Favicons([]byte(clean), faviconColor())
+	if err != nil {
+		return false, fmt.Errorf("derive favicons: %w", err)
+	}
+	for _, f := range files {
+		if err := writeFile(filepath.Join(staging, filepath.FromSlash(f.Path)), f.Bytes); err != nil {
+			return false, err
+		}
+	}
+	return true, nil
+}
+
+// faviconColor is the concrete colour bound to currentColor for the raster
+// favicons — a neutral dark that reads on light backgrounds. The SVG favicon
+// keeps currentColor and themes freely.
+func faviconColor() colorRGBA { return colorRGBA{0x1e, 0x1e, 0x1e, 0xff} }
+
+type colorRGBA struct{ R, G, B, A uint8 }
+
+func (c colorRGBA) RGBA() (r, g, b, a uint32) {
+	return uint32(c.R) * 0x101, uint32(c.G) * 0x101, uint32(c.B) * 0x101, uint32(c.A) * 0x101
+}
+
 // copyMediaDir copies every regular, non-hidden file under src into dst, preserving
 // the relative layout. A missing src is a no-op — sites without media/ stay
 // media-free.
@@ -339,7 +430,7 @@ type pageOutcome struct {
 // input tuple and looks it up: a hit writes the cached bytes and skips
 // materialization entirely; a miss renders fresh, stores the bytes, then writes
 // them. With Check on, or no cache, it always renders fresh and runs the linter.
-func renderPage(t *theme.Theme, ldr *content.Loader, s *site.Site, p site.Page, cache *renderCache, tables *tableResolver, styleHref, staging string, opts Options, routes map[string]bool) pageOutcome {
+func renderPage(t *theme.Theme, ldr *content.Loader, s *site.Site, p site.Page, cache *renderCache, tables *tableResolver, hasFavicons bool, styleHref, staging string, opts Options, routes map[string]bool) pageOutcome {
 	outPath := filepath.Join(staging, site.OutputPath(p.Route))
 
 	if cache != nil && !opts.Check {
@@ -347,14 +438,18 @@ func renderPage(t *theme.Theme, ldr *content.Loader, s *site.Site, p site.Page, 
 		if err != nil {
 			return pageOutcome{err: fmt.Errorf("inputs page %q: %w", p.ID, err)}
 		}
-		key := pageKey(opts.Version, styleHref, tmpl, t, s, p, frags, tables.keyMaterial(frags))
+		favMat := ""
+		if hasFavicons {
+			favMat = "fav:" + logoDigest(tables.siteDir, t, ldr, p)
+		}
+		key := pageKey(opts.Version, styleHref, tmpl, t, s, p, frags, append(tables.keyMaterial(frags), favMat))
 		if b, ok := cache.get(key); ok {
 			if err := writeFile(outPath, b); err != nil {
 				return pageOutcome{err: err}
 			}
 			return pageOutcome{cached: true}
 		}
-		b, _, _, err := materializeRender(t, ldr, s, p, tables, styleHref)
+		b, _, _, err := materializeRender(t, ldr, s, p, tables, hasFavicons, styleHref)
 		if err != nil {
 			return pageOutcome{err: err}
 		}
@@ -365,7 +460,7 @@ func renderPage(t *theme.Theme, ldr *content.Loader, s *site.Site, p site.Page, 
 		return pageOutcome{}
 	}
 
-	b, doc, rep, err := materializeRender(t, ldr, s, p, tables, styleHref)
+	b, doc, rep, err := materializeRender(t, ldr, s, p, tables, hasFavicons, styleHref)
 	if err != nil {
 		return pageOutcome{err: err}
 	}
@@ -384,16 +479,23 @@ func renderPage(t *theme.Theme, ldr *content.Loader, s *site.Site, p site.Page, 
 // rendered bytes alongside the document and slot report (which the linter, but
 // not the cache, needs). It is the one function whose output the cache stores,
 // so pageKey must hash every input it reads.
-func materializeRender(t *theme.Theme, ldr *content.Loader, s *site.Site, p site.Page, tables *tableResolver, styleHref string) ([]byte, *html.Node, materialize.Report, error) {
+func materializeRender(t *theme.Theme, ldr *content.Loader, s *site.Site, p site.Page, tables *tableResolver, hasFavicons bool, styleHref string) ([]byte, *html.Node, materialize.Report, error) {
 	doc, rep, err := materialize.Page(t, ldr, p, materialize.Options{
-		Tables:   tables.resolve,
-		Variants: mediaVariants(tables.siteDir),
+		Tables:    tables.resolve,
+		Variants:  mediaVariants(tables.siteDir),
+		InlineSVG: svg.InlineResolver(tables.siteDir, t),
 	})
 	if err != nil {
 		return nil, nil, rep, fmt.Errorf("materialize page %q: %w", p.ID, err)
 	}
 	if err := seo.Apply(doc, s, p); err != nil {
 		return nil, nil, rep, err
+	}
+	if hasFavicons {
+		if head := render.Head(doc); head != nil {
+			prefix := repeatDotDot(p.Route)
+			head.AppendChild(render.Raw(svg.FaviconLinks(prefix)))
+		}
 	}
 	if styleHref != "" {
 		render.AppendStylesheet(doc, styleHref)

@@ -40,6 +40,8 @@ func main() {
 		os.Exit(cmdServe(os.Args[2:]))
 	case "theme":
 		os.Exit(cmdTheme(os.Args[2:]))
+	case "passwd":
+		os.Exit(cmdPasswd(os.Args[2:]))
 	case "version", "--version", "-version":
 		fmt.Printf("palimpseste %s\n", version)
 	case "help", "-h", "--help":
@@ -61,6 +63,7 @@ usage:
   palimpseste theme list  [flags]           list available themes
   palimpseste theme check [flags] <name>    compatibility report (§5.3)
   palimpseste theme apply [flags] <name>    check, migrate, switch, commit
+  palimpseste passwd                        hash an admin password for edit --listen
   palimpseste version              print version
   palimpseste help                 show this help
 
@@ -75,8 +78,10 @@ build flags:
 
 edit flags:
   -site dir    site directory holding site.json, content/, themes/ (default ".")
-  -addr host   loopback address to bind (default "127.0.0.1:7777")
+  -addr host   address to bind (default "127.0.0.1:7777")
   -open        open the editor in your browser
+  -listen      remote mode: authenticate (PALIMPSESTE_ADMIN_HASH) and allow a
+               routable bind address (§8, §14)
 
 serve flags:
   -site dir    site directory whose public/ to serve (default ".")
@@ -141,14 +146,30 @@ func cmdBuild(args []string) int {
 func cmdEdit(args []string) int {
 	fs := flag.NewFlagSet("edit", flag.ExitOnError)
 	siteDir := fs.String("site", ".", "site directory (site.json, content/, themes/)")
-	addr := fs.String("addr", editserver.DefaultAddr, "loopback address to bind")
+	addr := fs.String("addr", editserver.DefaultAddr, "address to bind")
 	open := fs.Bool("open", false, "open the editor in your browser")
+	listen := fs.Bool("listen", false, "remote mode: authenticate and allow a routable bind address (§8)")
 	_ = fs.Parse(args)
 
+	// Remote mode reads the admin password hash from the environment, never the
+	// repository (§3.1, §14). Generate one with `palimpseste passwd`.
+	passwordHash := ""
+	if *listen {
+		passwordHash = os.Getenv("PALIMPSESTE_ADMIN_HASH")
+		if passwordHash == "" {
+			fmt.Fprintln(os.Stderr, "palimpseste: edit --listen exige PALIMPSESTE_ADMIN_HASH (voir `palimpseste passwd`)")
+			return 1
+		}
+		if *addr == editserver.DefaultAddr {
+			*addr = "0.0.0.0:7777" // a routable default once authenticated
+		}
+	}
+
 	srv, err := editserver.New(editserver.Options{
-		SiteDir: *siteDir,
-		Addr:    *addr,
-		Version: version,
+		SiteDir:      *siteDir,
+		Addr:         *addr,
+		Version:      version,
+		PasswordHash: passwordHash,
 	})
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "palimpseste: %v\n", err)

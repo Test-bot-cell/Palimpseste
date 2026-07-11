@@ -30,6 +30,7 @@ import (
 	"sync"
 	"time"
 
+	"palimpseste/internal/auth"
 	"palimpseste/internal/blocks"
 	"palimpseste/internal/build"
 	"palimpseste/internal/content"
@@ -60,20 +61,27 @@ var (
 // Options configure an edit server.
 type Options struct {
 	SiteDir string // directory holding site.json, content/, themes/
-	Addr    string // loopback bind address; defaults to DefaultAddr
+	Addr    string // bind address; loopback unless PasswordHash is set
 	Version string // binary version (reserved for future surfacing)
+	// PasswordHash, when set, puts the server in remote mode (§8, §14): it may
+	// bind a routable address, and every request is gated behind an
+	// argon2id-authenticated session. The hash lives outside the repo (env or
+	// config), never in site.json.
+	PasswordHash string
 }
 
 // Server is the running editor. Its mutable view of the site lives in an
 // immutable snapshot swapped under mu on reload, so request handlers read a
 // coherent picture without holding a lock across a render.
 type Server struct {
-	opts   Options
-	csrf   string
-	hub    *hub
-	hist   *history.Recorder
-	mediaQ *media.Queue
-	mux    *http.ServeMux
+	opts     Options
+	csrf     string
+	hub      *hub
+	hist     *history.Recorder
+	mediaQ   *media.Queue
+	mux      *http.ServeMux
+	sessions *auth.Sessions
+	limiter  *auth.Limiter
 
 	mu  sync.RWMutex
 	cur *snapshot
@@ -99,8 +107,10 @@ func New(opts Options) (*Server, error) {
 	if opts.Addr == "" {
 		opts.Addr = DefaultAddr
 	}
-	if err := requireLoopbackAddr(opts.Addr); err != nil {
-		return nil, err
+	if opts.PasswordHash == "" {
+		if err := requireLoopbackAddr(opts.Addr); err != nil {
+			return nil, fmt.Errorf("%w — set a password (edit --listen) to bind a routable address", err)
+		}
 	}
 	tok, err := randomToken()
 	if err != nil {
@@ -124,6 +134,10 @@ func New(opts Options) (*Server, error) {
 	}
 	s.hist = hist
 	s.mediaQ = media.NewQueue(opts.SiteDir, s.onMediaEvent)
+	if opts.PasswordHash != "" {
+		s.sessions = auth.NewSessions(12 * time.Hour)
+		s.limiter = auth.NewLimiter()
+	}
 	s.routes()
 	return s, nil
 }
@@ -217,6 +231,9 @@ func (s *Server) routes() {
 	mux.HandleFunc("GET /api/check", s.handleCheck)
 	mux.HandleFunc("GET /api/events", s.handleEvents)
 	mux.HandleFunc("GET /media/", s.handleMedia)
+	mux.HandleFunc("POST /api/login", s.handleLogin)
+	mux.HandleFunc("POST /api/logout", s.handleLogout)
+	mux.HandleFunc("GET /_pal/login", s.handleLoginPage)
 	mux.HandleFunc("/", s.handlePage)
 	s.mux = mux
 }
@@ -226,7 +243,35 @@ func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("X-Content-Type-Options", "nosniff")
 	// The local editor should never be framed by another origin.
 	w.Header().Set("Content-Security-Policy", "frame-ancestors 'none'")
+	if s.remote() && !s.authenticated(r) && !isPublicPath(r.URL.Path) {
+		// Unauthenticated remote request: the login page for a browser GET, a
+		// crisp 401 for the API.
+		if r.Method == http.MethodGet && !strings.HasPrefix(r.URL.Path, "/api/") {
+			http.Redirect(w, r, "/_pal/login", http.StatusSeeOther)
+			return
+		}
+		http.Error(w, "authentication required", http.StatusUnauthorized)
+		return
+	}
 	s.mux.ServeHTTP(w, r)
+}
+
+// remote reports whether the server runs authenticated (§14).
+func (s *Server) remote() bool { return s.sessions != nil }
+
+// authenticated reports whether the request carries a live session cookie.
+func (s *Server) authenticated(r *http.Request) bool {
+	c, err := r.Cookie(sessionCookie)
+	if err != nil {
+		return false
+	}
+	return s.sessions.Valid(c.Value, time.Now())
+}
+
+// isPublicPath lists the routes reachable without a session: the login page and
+// its endpoint. Everything else — pages, API, assets, media — is gated.
+func isPublicPath(p string) bool {
+	return p == "/_pal/login" || p == "/api/login"
 }
 
 // --- handlers ----------------------------------------------------------------

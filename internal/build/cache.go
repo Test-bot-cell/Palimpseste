@@ -100,7 +100,7 @@ func (c *renderCache) put(key string, b []byte) {
 //
 // Components are length-framed before hashing so no two distinct tuples can
 // serialise to the same byte stream.
-func pageKey(version, styleHref, template string, t *theme.Theme, s *site.Site, p site.Page, frags []materialize.SlotFragment) string {
+func pageKey(version, styleHref, template string, t *theme.Theme, s *site.Site, p site.Page, frags []materialize.SlotFragment, tableMaterial []string) string {
 	h := sha256.New()
 	writeChunk := func(b []byte) {
 		var n [8]byte
@@ -134,5 +134,13 @@ func pageKey(version, styleHref, template string, t *theme.Theme, s *site.Site, 
 			writeStr("0")
 		}
 	}
+	// §7's table → page edges: the referenced tables' current bytes, so a data
+	// edit invalidates exactly the pages that render it. The theme's declared
+	// schemas ride along so a schema change re-renders too.
+	for _, chunk := range tableMaterial {
+		writeStr(chunk)
+	}
+	dataJSON, _ := json.Marshal(t.Data)
+	writeChunk(dataJSON)
 	return hex.EncodeToString(h.Sum(nil))
 }

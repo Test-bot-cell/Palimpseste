@@ -125,3 +125,40 @@ func TestMediaSrcResolvedByRouteDepth(t *testing.T) {
 		})
 	}
 }
+
+// §4.1/§7/§14: the table computed block renders its data/ source with
+// systematic escaping; unresolved sources degrade to an empty container.
+func TestTableBlockRendersEscaped(t *testing.T) {
+	tm, ldr := tocFixture(t, `<div data-block="table" data-source="equipe">stale</div>`)
+	resolve := func(name string) ([]string, [][]string, bool) {
+		if name != "equipe" {
+			return nil, nil, false
+		}
+		return []string{"nom", "rôle"}, [][]string{{"Ada", "<script>alert(1)</script>"}}, true
+	}
+	doc, _, err := Page(tm, ldr, site.Page{ID: "pg", Template: "p", Route: "/"}, Options{Tables: resolve})
+	if err != nil {
+		t.Fatal(err)
+	}
+	out, _ := render.Render(doc)
+	for _, want := range []string{"<thead><tr><th>nom</th><th>rôle</th></tr></thead>", "<td>Ada</td>", "&lt;script&gt;"} {
+		if !strings.Contains(out, want) {
+			t.Errorf("table render missing %q:\n%s", want, out)
+		}
+	}
+	if strings.Contains(out, "<script>") || strings.Contains(out, "stale") {
+		t.Errorf("unescaped cell or stale content survived:\n%s", out)
+	}
+}
+
+func TestTableBlockDegradesWithoutSource(t *testing.T) {
+	tm, ldr := tocFixture(t, `<div data-block="table" data-source="absente">stale</div>`)
+	doc, _, err := Page(tm, ldr, site.Page{ID: "pg", Template: "p", Route: "/"}, Options{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	out, _ := render.Render(doc)
+	if !strings.Contains(out, `<div data-block="table" data-source="absente"></div>`) {
+		t.Errorf("unresolved table block should render as its empty container:\n%s", out)
+	}
+}

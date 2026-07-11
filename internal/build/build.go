@@ -76,6 +76,7 @@ type Lock struct {
 	Palimpseste string    `json:"palimpseste"`
 	Theme       LockTheme `json:"theme"`
 	ContentHash string    `json:"contentHash"`
+	DataHash    string    `json:"dataHash"`
 	Pages       int       `json:"pages"`
 }
 
@@ -139,6 +140,7 @@ func Run(opts Options) (*Result, error) {
 	// ordering and the returned error stay deterministic regardless of which
 	// goroutine finished first.
 	cache := openCache(opts.CacheDir)
+	tables := newTableResolver(opts.SiteDir, t)
 	pages := s.SortedPages()
 	outs := make([]pageOutcome, len(pages))
 
@@ -150,7 +152,7 @@ func Run(opts Options) (*Result, error) {
 		go func(i int) {
 			defer wg.Done()
 			defer func() { <-sem }()
-			outs[i] = renderPage(t, ldr, s, pages[i], cache, styleHref, staging, opts, routes)
+			outs[i] = renderPage(t, ldr, s, pages[i], cache, tables, styleHref, staging, opts, routes)
 		}(i)
 	}
 	wg.Wait()
@@ -189,10 +191,15 @@ func Run(opts Options) (*Result, error) {
 	if err != nil {
 		return nil, err
 	}
+	dataHash, err := hashTree(filepath.Join(opts.SiteDir, "data"))
+	if err != nil {
+		return nil, err
+	}
 	res.Lock = Lock{
 		Palimpseste: opts.Version,
 		Theme:       LockTheme{Name: t.Name, Version: t.Version, Hash: themeHash},
 		ContentHash: contentHash,
+		DataHash:    dataHash,
 		Pages:       res.Pages,
 	}
 	lockJSON, err := marshalLock(res.Lock)
@@ -332,7 +339,7 @@ type pageOutcome struct {
 // input tuple and looks it up: a hit writes the cached bytes and skips
 // materialization entirely; a miss renders fresh, stores the bytes, then writes
 // them. With Check on, or no cache, it always renders fresh and runs the linter.
-func renderPage(t *theme.Theme, ldr *content.Loader, s *site.Site, p site.Page, cache *renderCache, styleHref, staging string, opts Options, routes map[string]bool) pageOutcome {
+func renderPage(t *theme.Theme, ldr *content.Loader, s *site.Site, p site.Page, cache *renderCache, tables *tableResolver, styleHref, staging string, opts Options, routes map[string]bool) pageOutcome {
 	outPath := filepath.Join(staging, site.OutputPath(p.Route))
 
 	if cache != nil && !opts.Check {
@@ -340,14 +347,14 @@ func renderPage(t *theme.Theme, ldr *content.Loader, s *site.Site, p site.Page, 
 		if err != nil {
 			return pageOutcome{err: fmt.Errorf("inputs page %q: %w", p.ID, err)}
 		}
-		key := pageKey(opts.Version, styleHref, tmpl, t, s, p, frags)
+		key := pageKey(opts.Version, styleHref, tmpl, t, s, p, frags, tables.keyMaterial(frags))
 		if b, ok := cache.get(key); ok {
 			if err := writeFile(outPath, b); err != nil {
 				return pageOutcome{err: err}
 			}
 			return pageOutcome{cached: true}
 		}
-		b, _, _, err := materializeRender(t, ldr, s, p, styleHref)
+		b, _, _, err := materializeRender(t, ldr, s, p, tables, styleHref)
 		if err != nil {
 			return pageOutcome{err: err}
 		}
@@ -358,7 +365,7 @@ func renderPage(t *theme.Theme, ldr *content.Loader, s *site.Site, p site.Page, 
 		return pageOutcome{}
 	}
 
-	b, doc, rep, err := materializeRender(t, ldr, s, p, styleHref)
+	b, doc, rep, err := materializeRender(t, ldr, s, p, tables, styleHref)
 	if err != nil {
 		return pageOutcome{err: err}
 	}
@@ -377,8 +384,8 @@ func renderPage(t *theme.Theme, ldr *content.Loader, s *site.Site, p site.Page, 
 // rendered bytes alongside the document and slot report (which the linter, but
 // not the cache, needs). It is the one function whose output the cache stores,
 // so pageKey must hash every input it reads.
-func materializeRender(t *theme.Theme, ldr *content.Loader, s *site.Site, p site.Page, styleHref string) ([]byte, *html.Node, materialize.Report, error) {
-	doc, rep, err := materialize.Page(t, ldr, p, materialize.Options{})
+func materializeRender(t *theme.Theme, ldr *content.Loader, s *site.Site, p site.Page, tables *tableResolver, styleHref string) ([]byte, *html.Node, materialize.Report, error) {
+	doc, rep, err := materialize.Page(t, ldr, p, materialize.Options{Tables: tables.resolve})
 	if err != nil {
 		return nil, nil, rep, fmt.Errorf("materialize page %q: %w", p.ID, err)
 	}

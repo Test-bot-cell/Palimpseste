@@ -185,6 +185,7 @@ func (s *Server) watchRoots() []string {
 	snap := s.current()
 	return []string{
 		snap.ldr.Root(),
+		filepath.Join(s.opts.SiteDir, "data"),
 		snap.theme.Dir(),
 	}
 }
@@ -202,6 +203,8 @@ func (s *Server) routes() {
 	mux.HandleFunc("GET /api/fragments/{page}/{slot}", s.handleFragmentGet)
 	mux.HandleFunc("PUT /api/fragments/{page}/{slot}", s.handleFragmentPut)
 	mux.HandleFunc("PUT /api/pages/{page}/meta", s.handleMetaPut)
+	mux.HandleFunc("GET /api/data/{table}", s.handleDataGet)
+	mux.HandleFunc("PUT /api/data/{table}", s.handleDataPut)
 	mux.HandleFunc("GET /api/theme", s.handleThemeGet)
 	mux.HandleFunc("PUT /api/theme/tokens", s.handleTokensPut)
 	mux.HandleFunc("GET /api/theme/check", s.handleThemeCheck)
@@ -250,7 +253,7 @@ func (s *Server) handlePage(w http.ResponseWriter, r *http.Request) {
 		Blocks: blocks.Schema(),
 		Meta:   pageMeta{Title: p.Title, Description: p.Description, OgImage: p.OgImage},
 	}
-	out, err := renderEditPage(snap.theme, snap.ldr, snap.site, p, !snap.css.Empty(), cfg)
+	out, err := renderEditPage(snap.theme, snap.ldr, snap.site, p, s.opts.SiteDir, !snap.css.Empty(), cfg)
 	if err != nil {
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 		return

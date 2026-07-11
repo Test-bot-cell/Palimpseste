@@ -14,6 +14,7 @@ package materialize
 
 import (
 	"fmt"
+	"sort"
 	"strconv"
 	"strings"
 	"unicode"
@@ -34,6 +35,10 @@ type Options struct {
 	// KeepSlotMarkers leaves the data-slot attribute in place. The edit server
 	// needs it to map DOM regions back to fragments; production strips it.
 	KeepSlotMarkers bool
+	// Tables resolves a data/ table for the computed `table` block (§4.1). A
+	// nil resolver, or an unresolved name, leaves the block container empty —
+	// the §4.1 graceful degradation, never a broken page.
+	Tables func(name string) (header []string, rows [][]string, ok bool)
 }
 
 // Report records which slots the template asked for and whether each was
@@ -134,17 +139,93 @@ func Page(t *theme.Theme, ldr *content.Loader, p site.Page, opts Options) (*html
 	}
 
 	renderComputedBlocks(doc)
+	renderTableBlocks(doc, opts.Tables)
 	resolveMediaURLs(doc, p.Route)
 
 	return doc, rep, nil
 }
 
+// TablesReferenced returns the data/ table names the resolved fragments use in
+// `table` blocks, sorted and deduplicated — the slot/table → page edges of the
+// §7 dependency graph, which the build folds into each page's memoisation key.
+func TablesReferenced(frags []SlotFragment) []string {
+	seen := map[string]bool{}
+	for _, f := range frags {
+		if !f.Found || !strings.Contains(f.Body, "data-block") {
+			continue
+		}
+		host := render.Element("body", nil)
+		nodes, err := render.ParseFragment(f.Body, host)
+		if err != nil {
+			continue
+		}
+		render.ReplaceChildren(host, nodes)
+		for _, n := range render.FindAll(host, func(n *html.Node) bool {
+			if n.Type != html.ElementNode {
+				return false
+			}
+			name, ok := render.GetAttr(n, "data-block")
+			return ok && name == "table"
+		}) {
+			if src, ok := render.GetAttr(n, "data-source"); ok && src != "" {
+				seen[src] = true
+			}
+		}
+	}
+	out := make([]string, 0, len(seen))
+	for n := range seen {
+		out = append(out, n)
+	}
+	sort.Strings(out)
+	return out
+}
+
+// renderTableBlocks renders every `table` computed block (§4.1) from its data/
+// source: header row then body rows, every cell as text nodes — the systematic
+// escaping §14 demands lives in the serializer, no string concatenation ever
+// touches cell content.
+func renderTableBlocks(doc *html.Node, resolve func(string) ([]string, [][]string, bool)) {
+	for _, n := range render.FindAll(doc, func(n *html.Node) bool {
+		if n.Type != html.ElementNode {
+			return false
+		}
+		name, ok := render.GetAttr(n, "data-block")
+		return ok && name == "table"
+	}) {
+		render.ReplaceChildren(n, nil)
+		if resolve == nil {
+			continue
+		}
+		src, _ := render.GetAttr(n, "data-source")
+		header, rows, ok := resolve(src)
+		if !ok || len(header) == 0 {
+			continue
+		}
+
+		thead := render.Element("thead", nil)
+		hr := render.Element("tr", nil)
+		for _, h := range header {
+			hr.AppendChild(render.Element("th", nil, render.Text(h)))
+		}
+		thead.AppendChild(hr)
+
+		tbody := render.Element("tbody", nil)
+		for _, row := range rows {
+			tr := render.Element("tr", nil)
+			for _, cell := range row {
+				tr.AppendChild(render.Element("td", nil, render.Text(cell)))
+			}
+			tbody.AppendChild(tr)
+		}
+		n.AppendChild(render.Element("table", nil, thead, tbody))
+	}
+}
+
 // --- computed blocks (§4.1, §7) -------------------------------------------------
 
 // renderComputedBlocks runs the build-time half of the block catalogue over a
-// materialized document. V1 built-ins: `toc` renders here; `table` is accepted
-// by the contract but renders with the data/ layer (§18 M3) — until then its
-// container passes through untouched, the §4.1 graceful degradation.
+// materialized document. Built-ins: `toc` renders here; `table` renders in
+// renderTableBlocks against the data/ layer.
 func renderComputedBlocks(doc *html.Node) {
 	tocs := render.FindAll(doc, func(n *html.Node) bool {
 		if n.Type != html.ElementNode {

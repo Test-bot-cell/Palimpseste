@@ -309,7 +309,9 @@ func (s *Server) handleCheck(w http.ResponseWriter, r *http.Request) {
 
 	var issues []lint.Issue
 	for _, p := range snap.site.SortedPages() {
-		doc, rep, err := materialize.Page(snap.theme, snap.ldr, p, materialize.Options{})
+		doc, rep, err := materialize.Page(snap.theme, snap.ldr, p, materialize.Options{
+			Tables: liveTables(s.opts.SiteDir, snap.theme),
+		})
 		if err != nil {
 			http.Error(w, err.Error(), http.StatusInternalServerError)
 			return

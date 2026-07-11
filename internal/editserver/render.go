@@ -8,6 +8,7 @@ import (
 
 	"palimpseste/internal/blocks"
 	"palimpseste/internal/content"
+	"palimpseste/internal/data"
 	"palimpseste/internal/materialize"
 	"palimpseste/internal/render"
 	"palimpseste/internal/seo"
@@ -51,6 +52,23 @@ type pageMeta struct {
 	OgImage     string `json:"ogImage,omitempty"`
 }
 
+// liveTables resolves data/ tables for the edit view: read fresh per render so
+// the editor always shows the current grid, validated against the same schema
+// gate as the build (§3.3).
+func liveTables(siteDir string, t *theme.Theme) func(string) ([]string, [][]string, bool) {
+	return func(name string) ([]string, [][]string, bool) {
+		schema, declared := t.Data[name]
+		if !declared {
+			return nil, nil, false
+		}
+		tab, found, err := data.Load(siteDir, name)
+		if err != nil || !found || data.Validate(tab, schema) != nil {
+			return nil, nil, false
+		}
+		return tab.Header, tab.Rows, true
+	}
+}
+
 // pageEntry is one option in the overlay's page switcher.
 type pageEntry struct {
 	ID    string `json:"id"`
@@ -62,8 +80,11 @@ type pageEntry struct {
 // stylesheet — but keeps the data-slot markers so the overlay can turn each
 // region into an editor, then injects the overlay itself. hasCSS toggles the
 // theme stylesheet link (served live at themeCSSPath, not content-addressed).
-func renderEditPage(t *theme.Theme, ldr *content.Loader, s *site.Site, p site.Page, hasCSS bool, cfg overlayConfig) (string, error) {
-	doc, _, err := materialize.Page(t, ldr, p, materialize.Options{KeepSlotMarkers: true})
+func renderEditPage(t *theme.Theme, ldr *content.Loader, s *site.Site, p site.Page, siteDir string, hasCSS bool, cfg overlayConfig) (string, error) {
+	doc, _, err := materialize.Page(t, ldr, p, materialize.Options{
+		KeepSlotMarkers: true,
+		Tables:          liveTables(siteDir, t),
+	})
 	if err != nil {
 		return "", fmt.Errorf("materialize page %q: %w", p.ID, err)
 	}

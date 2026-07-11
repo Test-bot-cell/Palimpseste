@@ -34,11 +34,12 @@ func goldenSite(b testing.TB) (string, *site.Site, *theme.Theme, *content.Loader
 }
 
 func BenchmarkMaterializePage(b *testing.B) {
-	_, s, t, ldr := goldenSite(b)
+	dir, s, t, ldr := goldenSite(b)
+	tables := newTableResolver(dir, t)
 	p := s.SortedPages()[0]
 	b.ReportAllocs()
 	for b.Loop() {
-		if _, _, _, err := materializeRender(t, ldr, s, p, "/assets/x.css"); err != nil {
+		if _, _, _, err := materializeRender(t, ldr, s, p, tables, "/assets/x.css"); err != nil {
 			b.Fatal(err)
 		}
 	}
@@ -83,10 +84,11 @@ func bestOf(n int, fn func()) time.Duration {
 // §15: "Matérialisation complète — classe ~1 ms/page". The gate allows 10× the
 // class before failing: a regression that big is structural, not noise.
 func TestBudgetMaterializationPerPage(t *testing.T) {
-	_, s, tm, ldr := goldenSite(t)
+	dir, s, tm, ldr := goldenSite(t)
+	tables := newTableResolver(dir, tm)
 	p := s.SortedPages()[0]
 	best := bestOf(20, func() {
-		if _, _, _, err := materializeRender(tm, ldr, s, p, "/assets/x.css"); err != nil {
+		if _, _, _, err := materializeRender(tm, ldr, s, p, tables, "/assets/x.css"); err != nil {
 			t.Fatal(err)
 		}
 	})

@@ -1,0 +1,2 @@
+go test fuzz v1
+string("<div dAtA-BloCk=\"embed\"><ifrAme srC=https://www.youtube.com >\"")

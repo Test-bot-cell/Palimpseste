@@ -432,6 +432,12 @@ func enforceEmbeds(host *html.Node) {
 			render.Detach(n)
 			continue
 		}
+		// An embed iframe is a leaf: its element content is the browser's
+		// fallback, never authored data. Clearing it keeps the canonical form
+		// stable — a stray text child (a lone quote from a sloppy paste) would
+		// otherwise re-escape on each pass and break idempotence.
+		render.ReplaceChildren(n, nil)
+
 		title, hasTitle := render.GetAttr(n, "title")
 		attrs := []render.Attr{{Key: "src", Val: src}}
 		if hasTitle && strings.TrimSpace(title) != "" {

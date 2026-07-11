@@ -49,7 +49,17 @@ go run ./cmd/palimpseste serve -site examples/drake
 go run ./cmd/palimpseste theme list  -site examples/drake
 go run ./cmd/palimpseste theme check -site examples/drake atelier
 go run ./cmd/palimpseste theme apply -site examples/drake atelier
+
+# édition distante authentifiée (§8, §14) et publication (§13)
+go run ./cmd/palimpseste passwd                      # génère PALIMPSESTE_ADMIN_HASH
+go run ./cmd/palimpseste edit -site examples/drake -listen
+go run ./cmd/palimpseste publish -site examples/drake
 ```
+
+L'assistant IA (§12) est optionnel et hors dépôt : exportez
+`PALIMPSESTE_AI_ENDPOINT` + `PALIMPSESTE_AI_MODEL` (une API OpenAI-compatible ou
+Ollama local). Non configuré, il n'existe pas. Il **propose** (alt, description,
+titres) ; rien n'est écrit sans un geste humain, qui repasse par le contrat §4.
 
 Dans l'éditeur : les régions en pointillé sont éditables, `Ctrl+S` enregistre
 (sanitisation → écriture → commit git → build incrémental, §8), les boutons
@@ -82,8 +92,16 @@ un commit `edit(page/slot)` signé de votre identité git (§13).
   (sanitiseur XML maison, logo inline `currentColor`, favicons dérivés) ;
   minification HTML + attestation étendue (`data/` + encodeur WASM) ; auth
   distante (argon2id, `edit --listen`) ; publication (`git-push`).
-- ⏳ **M4 — Finitions produit.** Assistant IA (édition seulement, §12),
-  historique/revert dans l'UI, packaging reproductible, doc thèmes tiers.
+- ✅ **M4 — Finitions produit.** Assistant IA d'édition (§12) : client
+  OpenAI-compatible, config hors dépôt, Ollama local, suggestions
+  **advisory-only** (l'IA propose, jamais n'écrit) ; historique/revert dans
+  l'UI (vue sur `git log`, restauration par le chemin normal) ; builds
+  reproductibles multi-arch ; guide du contrat de thème pour auteurs tiers
+  ([docs/themes.md](docs/themes.md)).
+
+Le contrat d'architecture des §1–§17 est intégralement implémenté et vérifié.
+Reste ouvert par choix du mainteneur : le thème par défaut sur framework CSS
+(§6), fourni plus tard — le panneau de tokens est déjà agnostique.
 
 Note : le thème par défaut sur framework CSS (§6) est volontairement différé —
 le framework sera fourni par le mainteneur ; les thèmes de démonstration sont
@@ -139,14 +157,17 @@ internal/                     — couche 0 : primitive —
               public/ (§3, §7)
 
                               — couche 4 : le backend déplacé dans le temps —
+  ai          l'assistant d'édition optionnel (§12) : client OpenAI-compatible
+              (stdlib), config hors dépôt, advisory-only — propose, n'écrit jamais
   editserver  le mode edit : API §8 (CSRF + Origin + regex stricte §14),
               chaîne PUT = sanitisation → écriture → commit → build incrémental,
               SSE typé (build/error/reload/media), overlay TypeScript transpilé
-              in-process (assets/app.ts, Shadow DOM intégral §9) ; API M2/M3 :
-              theme, pages/{}/meta, check, data/{table}, media, publish ; auth
-              distante en option (mode --listen)
+              in-process (assets/app.ts, Shadow DOM intégral §9) ; API M2–M4 :
+              theme, pages/{}/meta, check, data/{table}, media, publish,
+              ai/suggest, history, revert ; auth distante en option (--listen)
   history     chaque sauvegarde = un commit go-git, auteur = utilisateur (§13) ;
-              CommitPaths regroupe une migration (renames) en un commit dédié
+              CommitPaths regroupe une migration en un commit ; Log/FileAt =
+              la vue historique et le revert (§13)
 ```
 
 **Règle de dépendance** : une couche n'importe que sous elle. `sanitize` et
